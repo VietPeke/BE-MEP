@@ -24,13 +24,20 @@ public class InvoicesController : ControllerBase
     private readonly Models.MEPDatabaseContext _context;
     private readonly IMapper _mapper;
     private readonly MepNotificationService _notifications;
-    private readonly ILogger<InvoicesController> _logger;
 
-    public InvoicesController(Models.MEPDatabaseContext context, IMapper mapper, MepNotificationService notifications, ILogger<InvoicesController> logger)
+    private readonly IOrderDiscountService _orderDiscountService;
+    private readonly ILogger<InvoicesController> _logger;
+    public InvoicesController(
+       Models.MEPDatabaseContext context,
+       IMapper mapper,
+       MepNotificationService notifications,
+       IOrderDiscountService orderDiscountService,
+       ILogger<InvoicesController> logger)
     {
         _context = context;
         _mapper = mapper;
         _notifications = notifications;
+        _orderDiscountService = orderDiscountService;
         _logger = logger;
     }
 
@@ -185,6 +192,8 @@ public class InvoicesController : ControllerBase
             UserId = userId,
             Status = "Draft",
             CreatedAt = now,
+            SubTotalAmount = 0,
+            DiscountAmount = 0,
             TotalAmount = 0
         };
 
@@ -462,7 +471,18 @@ public class InvoicesController : ControllerBase
 
         invoice.Status = "Completed";
         invoice.Order.Status = "Completed";
-        invoice.TotalAmount = totalAmount;
+
+
+        // Tính tổng tiền TRƯỚC chiết khấu
+        var subTotal = invoice.InvoiceItems.Sum(ii => ii.Quantity * ii.SellPrice);
+        invoice.SubTotalAmount = subTotal;
+
+        // Tính chiết khấu theo tổng giá trị đơn hàng
+        var (discountPercent, discountAmount, finalTotal) = await _orderDiscountService.CalculateDiscountAsync(subTotal);
+        invoice.DiscountPercent = discountPercent;
+        invoice.DiscountAmount = discountAmount;
+        invoice.TotalAmount = finalTotal;
+
 
         // Update customer stats
         if (invoice.Order.Customer != null)

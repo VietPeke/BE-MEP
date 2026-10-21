@@ -1027,7 +1027,7 @@ namespace MEP_Management_System.Controllers.InventoryController
                     Value = a.AttributeValue ?? ""
                 }).ToList(),
 
-                ConversionUnits = p.ProductConversionUnits.Select(c => new ConversionUnitDto
+                ConversionUnits = p.ProductConversionUnits.Select(c => new ProductConversionUnitDto
                 {
                     Id = c.ConversionId,
                     Name = c.UnitName,
