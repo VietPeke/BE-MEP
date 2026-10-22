@@ -1,0 +1,33 @@
+# Local AI assistant config (per-developer, not for the team)
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+docs/
+
+# .NET Core / ASP.NET
+bin/
+obj/
+*.dll
+*.pdb
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
+*.log
+appsettings.Development.json
+appsettings.local.json
+patch_seeder.py
+test_pos_flow.sh
+API_DOCUMENTATION.md
+
+API_DOCUMENTATION_INVENTORY_CHECK.md
+
+DATABASE_GUIDE.md
+.agents
+admin-rbac.md
+GEMINI.md
+.gemini
+.mcp.json
+.codegraph
+skills-lock.json
