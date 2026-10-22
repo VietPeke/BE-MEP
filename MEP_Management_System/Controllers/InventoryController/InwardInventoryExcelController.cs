@@ -1,17 +1,17 @@
+using ClosedXML.Excel;
+using MEP_Management_System.Authorization;
+using MEP_Management_System.DTOs;
+using MEP_Management_System.DTOs.InventoryDTOs;
+using MEP_Management_System.Models;
+using MEP_Management_System.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using System;
 using System.IO;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
-using MEP_Management_System.DTOs;
-using MEP_Management_System.DTOs.InventoryDTOs;
-using MEP_Management_System.Services;
-using MEP_Management_System.Authorization;
-using MEP_Management_System.Models;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using ClosedXML.Excel;
 
 namespace MEP_Management_System.Controllers.InventoryController
 {
@@ -112,10 +112,10 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// Bước 1: Upload và validate file Excel (chưa ghi DB).
         /// </summary>
         [HttpPost("parse")]
+        [Consumes("multipart/form-data")]
         [HasPermission(PermissionConstants.STOCK_INWARD_CREATE)]
         public async Task<IActionResult> ParseAndValidateExcel(
-            [FromForm] InwardInventoryExcelUploadDto uploadDto,
-            [FromForm] IFormFile file)
+            [FromForm] InwardInventoryExcelUploadDto uploadDto)
         {
             var currentUserId = GetCurrentUserId();
             if (currentUserId == null)
@@ -127,6 +127,8 @@ namespace MEP_Management_System.Controllers.InventoryController
                     Errors = new() { "User identity missing." }
                 });
             }
+
+            var file = uploadDto.File;
 
             // Validate file
             if (file == null || file.Length == 0)
@@ -279,9 +281,11 @@ namespace MEP_Management_System.Controllers.InventoryController
                 .AsNoTracking()
                 .FirstOrDefaultAsync(u => u.UserId == userId);
 
-            if (user?.DefaultBranchId != null && user.DefaultBranchId != Guid.Empty)
+            if (user?.DefaultBranchId is Guid defaultBranchId && defaultBranchId != Guid.Empty)
             {
-                return user.DefaultBranchId.Value;
+
+                return defaultBranchId;
+
             }
 
             // Ưu tiên 3: BranchId từ JWT token

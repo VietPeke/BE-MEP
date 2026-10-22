@@ -56,7 +56,6 @@ public class ReturnsController : ControllerBase
         var query = _context.ReturnOrders
             .Include(r => r.Order).ThenInclude(o => o!.Branch)
             .Include(r => r.Order).ThenInclude(o => o!.Invoices) // để map InvoiceCode
-            .Include(r => r.Order).ThenInclude(o => o!.Customer) // để map CustomerName
             .Include(r => r.User)
             .Include(r => r.ReturnItems).ThenInclude(ri => ri.BranchProduct).ThenInclude(bp => bp!.Product)
             .Where(r => r.Order!.BranchId == branchId)
@@ -71,7 +70,7 @@ public class ReturnsController : ControllerBase
             query = query.Where(r => relatedOrders.Contains(r.OrderId));
         }
         if (!string.IsNullOrEmpty(status))
-            query = query.Where(r => r.Status.ToLower() == status.ToLower());
+            query = query.Where(r => r.Status == status.ToUpper());
         if (dateFrom.HasValue)
             query = query.Where(r => r.CreatedAt >= dateFrom.Value);
         if (dateTo.HasValue)
@@ -100,7 +99,6 @@ public class ReturnsController : ControllerBase
         var branchId = GetBranchId();
         var r = await _context.ReturnOrders
             .Include(r => r.Order).ThenInclude(o => o!.Branch)
-            .Include(r => r.Order).ThenInclude(o => o!.Invoices)
             .Include(r => r.User)
             .Include(r => r.ReturnItems).ThenInclude(ri => ri.BranchProduct).ThenInclude(bp => bp!.Product)
             .FirstOrDefaultAsync(r => r.ReturnOrderId == id && r.Order!.BranchId == branchId);
