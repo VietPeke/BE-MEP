@@ -426,11 +426,9 @@ namespace MEP_Management_System.Services
                 .AsNoTracking()
                 .FirstOrDefaultAsync(u => u.UserId == userId);
 
-            if (user?.DefaultBranchId is Guid defaultBranchId && defaultBranchId != Guid.Empty)
+            if (user?.DefaultBranchId != null && user.DefaultBranchId != Guid.Empty)
             {
-
-                return defaultBranchId;
-
+                return user.DefaultBranchId.Value;
             }
 
             // Lấy từ ICurrentBranch

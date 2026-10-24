@@ -1,3 +1,8 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
 using ClosedXML.Excel;
 using MEP_Management_System.Authorization;
 using MEP_Management_System.DTOs;
@@ -7,11 +12,6 @@ using MEP_Management_System.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.IO;
-using System.Linq;
-using System.Security.Claims;
-using System.Threading.Tasks;
 
 namespace MEP_Management_System.Controllers.InventoryController
 {
@@ -112,10 +112,9 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// Bước 1: Upload và validate file Excel (chưa ghi DB).
         /// </summary>
         [HttpPost("parse")]
-        [Consumes("multipart/form-data")]
         [HasPermission(PermissionConstants.STOCK_INWARD_CREATE)]
         public async Task<IActionResult> ParseAndValidateExcel(
-            [FromForm] InwardInventoryExcelUploadDto uploadDto)
+            InwardInventoryExcelUploadDto uploadDto)
         {
             var currentUserId = GetCurrentUserId();
             if (currentUserId == null)
@@ -128,10 +127,8 @@ namespace MEP_Management_System.Controllers.InventoryController
                 });
             }
 
-            var file = uploadDto.File;
-
             // Validate file
-            if (file == null || file.Length == 0)
+            if (uploadDto.File == null || uploadDto.File.Length == 0)
             {
                 return BadRequest(new ApiResponse<object>
                 {
@@ -141,7 +138,7 @@ namespace MEP_Management_System.Controllers.InventoryController
                 });
             }
 
-            var extension = Path.GetExtension(file.FileName)?.ToLowerInvariant();
+            var extension = Path.GetExtension(uploadDto.File.FileName)?.ToLowerInvariant();
             if (extension != ".xlsx" && extension != ".xls")
             {
                 return BadRequest(new ApiResponse<object>
@@ -150,7 +147,7 @@ namespace MEP_Management_System.Controllers.InventoryController
                     Message = "Chỉ chấp nhận file Excel (.xlsx, .xls).",
                     Errors = new() { "Invalid file format." }
                 });
-            }
+            }bờ
 
             // Resolve branchId theo pattern Owner/Staff
             var branchId = await ResolveBranchIdAsync(uploadDto.BranchId, currentUserId.Value);
@@ -158,10 +155,10 @@ namespace MEP_Management_System.Controllers.InventoryController
 
             try
             {
-                using var stream = file.OpenReadStream();
+                using var stream = uploadDto.File.OpenReadStream();
                 var result = await _excelService.ParseAndValidateExcelAsync(
                     stream,
-                    file.FileName,
+                    uploadDto.File.FileName,
                     uploadDto,
                     currentUserId.Value);
 
@@ -281,11 +278,9 @@ namespace MEP_Management_System.Controllers.InventoryController
                 .AsNoTracking()
                 .FirstOrDefaultAsync(u => u.UserId == userId);
 
-            if (user?.DefaultBranchId is Guid defaultBranchId && defaultBranchId != Guid.Empty)
+            if (user?.DefaultBranchId != null && user.DefaultBranchId != Guid.Empty)
             {
-
-                return defaultBranchId;
-
+                return user.DefaultBranchId.Value;
             }
 
             // Ưu tiên 3: BranchId từ JWT token

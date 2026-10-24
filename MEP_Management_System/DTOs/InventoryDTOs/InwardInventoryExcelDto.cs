@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using Microsoft.AspNetCore.Http;
 
 namespace MEP_Management_System.DTOs.InventoryDTOs
 {
@@ -22,9 +21,6 @@ namespace MEP_Management_System.DTOs.InventoryDTOs
 
         /// <summary>Ghi chú chung cho phiếu nhập</summary>
         public string? Note { get; set; }
-
-        /// <summary>File Excel cần import</summary>
-        public IFormFile? File { get; set; }
     }
 
     /// <summary>

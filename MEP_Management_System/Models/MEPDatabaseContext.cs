@@ -1296,10 +1296,6 @@ public partial class MEPDatabaseContext : DbContext
                 .HasColumnType("timestamp without time zone")
                 .HasColumnName("created_at");
             entity.Property(e => e.UserId).HasColumnName("user_id");
-            entity.Property(e => e.SupplierId).HasColumnName("supplier_id");
-            entity.Property(e => e.TotalAmount)
-                .HasPrecision(15, 2)
-                .HasColumnName("total_amount");
             entity.Property(e => e.TicketCode)
                 .HasMaxLength(50)
                 .HasColumnName("ticket_code");
@@ -1333,11 +1329,6 @@ public partial class MEPDatabaseContext : DbContext
                 .HasForeignKey(d => d.UserId)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("stock_tickets_user_id_fkey");
-
-            entity.HasOne(d => d.Supplier).WithMany(p => p.StockTickets)
-                .HasForeignKey(d => d.SupplierId)
-                .OnDelete(DeleteBehavior.SetNull)
-                .HasConstraintName("stock_tickets_supplier_id_fkey");
 
             entity.HasOne(d => d.ConfirmedByUser).WithMany()
                 .HasForeignKey(d => d.ConfirmedBy)
@@ -2331,6 +2322,8 @@ public partial class MEPDatabaseContext : DbContext
             entity.Property(e => e.OrderDiscountTierId)
                 .HasDefaultValueSql("uuid_generate_v4()")
                 .HasColumnName("order_discount_tier_id");
+            entity.Property(e => e.BranchId)
+                .HasColumnName("branch_id");
             entity.Property(e => e.MinOrderValue)
                 .IsRequired()
                 .HasPrecision(18, 2)
