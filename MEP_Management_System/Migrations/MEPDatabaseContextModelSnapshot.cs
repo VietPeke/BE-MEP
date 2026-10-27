@@ -56,6 +56,9 @@ namespace MEP_Management_System.Migrations
                         .HasColumnType("timestamp without time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<int?>("ExchangeDaysAllowed")
+                        .HasColumnType("integer");
+
                     b.Property<short>("IsActive")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("smallint")
@@ -70,6 +73,9 @@ namespace MEP_Management_System.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)")
                         .HasColumnName("phone");
+
+                    b.Property<int?>("ReturnDaysAllowed")
+                        .HasColumnType("integer");
 
                     b.Property<string>("Type")
                         .HasMaxLength(50)
@@ -1813,6 +1819,62 @@ namespace MEP_Management_System.Migrations
                     b.ToTable("product_conversion_units", (string)null);
                 });
 
+            modelBuilder.Entity("MEP_Management_System.Models.ProductLocation", b =>
+                {
+                    b.Property<Guid>("LocationId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id")
+                        .HasDefaultValueSql("uuid_generate_v4()");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("description");
+
+                    b.Property<short>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)1)
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("LocationCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("location_code");
+
+                    b.Property<string>("LocationName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("location_name");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("LocationId")
+                        .HasName("product_locations_pkey");
+
+                    b.HasIndex("LocationName")
+                        .IsUnique()
+                        .HasDatabaseName("ix_product_locations_location_name");
+
+                    b.ToTable("product_locations", (string)null);
+                });
+
             modelBuilder.Entity("MEP_Management_System.Models.ProductTaxonomy", b =>
                 {
                     b.Property<Guid>("TaxonomyId")
@@ -3110,6 +3172,9 @@ namespace MEP_Management_System.Migrations
                     b.Property<Guid?>("DefaultBranchId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<string>("Email")
                         .IsRequired()
                         .HasMaxLength(150)
@@ -3189,6 +3254,10 @@ namespace MEP_Management_System.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("user_permission_id")
                         .HasDefaultValueSql("uuid_generate_v4()");
+
+                    b.Property<bool?>("IsGranted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_granted");
 
                     b.Property<Guid>("PermissionId")
                         .HasColumnType("uuid")
