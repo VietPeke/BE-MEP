@@ -3170,7 +3170,8 @@ namespace MEP_Management_System.Migrations
                         .HasColumnName("created_by");
 
                     b.Property<Guid?>("DefaultBranchId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("default_branch_id");
 
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("timestamp without time zone");
@@ -3234,6 +3235,8 @@ namespace MEP_Management_System.Migrations
                         .HasName("users_pkey");
 
                     b.HasIndex("CreatedBy");
+
+                    b.HasIndex("DefaultBranchId");
 
                     b.HasIndex(new[] { "Email" }, "users_email_unique")
                         .IsUnique();
@@ -4318,7 +4321,15 @@ namespace MEP_Management_System.Migrations
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("users_created_by_fkey");
 
+                    b.HasOne("MEP_Management_System.Models.Branch", "DefaultBranch")
+                        .WithMany()
+                        .HasForeignKey("DefaultBranchId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("users_default_branch_id_fkey");
+
                     b.Navigation("CreatedByUser");
+
+                    b.Navigation("DefaultBranch");
                 });
 
             modelBuilder.Entity("MEP_Management_System.Models.UserPermission", b =>
