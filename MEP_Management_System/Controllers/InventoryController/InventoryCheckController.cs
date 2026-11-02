@@ -201,14 +201,13 @@ public class InventoryCheckController : ControllerBase
                     TicketCode = ticket.TicketCode,
                     CreatedAt = ticket.CreatedAt,
                     Status = ticket.Status.ToString(),
-                    TotalProducts = ticket.Details.Count,
+                    DetailCount = ticket.Details.Count,
                     BranchId = ticket.BranchId,
                     CreatedByUserId = ticket.CreatedByUserId,
-                    CreatedByUserName = ticket.CreatedByUser != null ? ticket.CreatedByUser.Username : string.Empty,
+                    CreatedByUserName = ticket.CreatedByUser != null ? ticket.CreatedByUser.Username : null,
                     AssigneeUserId = ticket.AssigneeUserId,
                     AssigneeUserName = ticket.AssigneeUser != null ? ticket.AssigneeUser.Username : null,
-                    RecountNumber = ticket.RecountNumber,
-                    RecountReason = ticket.RecountReason
+                    RecountNumber = 0
                 })
                 .ToListAsync();
 
