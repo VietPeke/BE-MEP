@@ -6,13 +6,15 @@ namespace MEP_Management_System.DTOs.InventoryDTOs
     #region Expense Voucher DTOs
 
     /// <summary>
-    /// Request body cho API tạo phiếu chi tiền (chỉ chi phí nội bộ - KHÔNG thanh toán NCC).
-    /// Để thanh toán NCC, dùng API /api/supplierpayments.
+    /// Request body cho API tạo phiếu chi tiền.
     /// </summary>
     public class ExpenseVoucherCreateDto
     {
         /// <summary>Nhóm chi phí (bắt buộc).</summary>
         public Guid CategoryId { get; set; }
+
+        /// <summary>Thanh toán cho NCC (nullable).</summary>
+        public Guid? SupplierId { get; set; }
 
         /// <summary>Số tiền chi (phải > 0).</summary>
         public decimal Amount { get; set; }
