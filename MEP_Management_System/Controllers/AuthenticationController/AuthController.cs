@@ -4,7 +4,6 @@ using MEP_Management_System.Models;
 using MEP_Management_System.Services;
 using MEP_Management_System.Services.Email;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -84,31 +83,78 @@ namespace MEP_Management_System.Controllers
         }
 
         // ==========================================
-        // 2. REGISTER VERIFY: VÔ HIỆU HÓA TẠO OWNER TỰ ĐĂNG KÝ
+        // 2. REGISTER VERIFY: XÁC THỰC OTP + TẠO CỬA HÀNG MẶC ĐỊNH & OWNER
         // ==========================================
-        // Từ 2026-07-27: Tài khoản Owner CHỈ được tạo bởi Admin.
-        // Endpoint này giữ để tương thích ngược nhưng không tạo Owner/Branch nữa.
-        // Owner cần liên hệ Admin qua api /api/admin/accounts/owners.
         [HttpPost("register/verify")]
         public async Task<IActionResult> RegisterVerify([FromBody] RegisterVerifyDto dto)
         {
-            // Đánh dấu OTP đã dùng (nếu có) để tránh reuse
             var otp = await _context.OtpVerifications
                 .FirstOrDefaultAsync(x => x.Email == dto.Email
                                        && x.OtpCode == dto.OtpCode
                                        && x.IsUsed == 0
                                        && x.ExpiredAt > DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified));
 
-            if (otp != null)
+            if (otp == null)
+                return BadRequest(new { message = "Mã OTP không chính xác hoặc đã hết hạn." });
+
+            var ownerRole = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == "Owner");
+            if (ownerRole == null)
             {
-                otp.IsUsed = 1;
-                await _context.SaveChangesAsync();
+                ownerRole = new Role
+                {
+                    RoleId = Guid.NewGuid(),
+                    RoleName = "Owner",
+                    Description = "Toàn quyền quản trị hệ thống chuỗi cửa hàng",
+                    IsSystem = 1
+                };
+                _context.Roles.Add(ownerRole);
             }
 
-            return StatusCode(StatusCodes.Status410Gone, new
+            var now = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified);
+
+            // Tạo Owner
+            var newUser = new User
             {
-                message = "Tính năng tự đăng ký tài khoản Owner đã ngừng hoạt động. Vui lòng liên hệ Admin để được tạo tài khoản."
+                UserId = Guid.NewGuid(),
+                Username = dto.Email,
+                Email = dto.Email,
+                FullName = dto.FullName,
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password),
+                IsActive = 1,
+                IsVerified = true,
+                CreatedAt = now
+            };
+            newUser.Roles.Add(ownerRole);
+            _context.Users.Add(newUser);
+
+            // Tạo đúng 1 Branch duy nhất (Hệ thống chạy Single-Branch ngầm)
+            var branch = new Branch
+            {
+                BranchId = Guid.NewGuid(),
+                BranchName = dto.BranchName,
+                ManagerUserId = newUser.UserId,
+                IsActive = 1,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            _context.Branches.Add(branch);
+
+            // Gán DefaultBranchId ngầm để phục vụ kiến trúc tương lai
+            newUser.DefaultBranchId = branch.BranchId;
+
+            // Vẫn lưu vào StaffAssignments để phục vụ phân quyền dữ liệu sau này
+            _context.StaffAssignments.Add(new StaffAssignment
+            {
+                AssignmentId = Guid.NewGuid(),
+                UserId = newUser.UserId,
+                BranchId = branch.BranchId,
+                AssignedAt = now
             });
+
+            otp.IsUsed = 1;
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Đăng ký thành công! Bạn có thể đăng nhập ngay." });
         }
 
         // ==========================================

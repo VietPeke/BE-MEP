@@ -16,28 +16,7 @@ public class AdminMappingProfile : Profile
             .ForMember(d => d.BranchName, o => o.MapFrom(s =>
                 s.StaffAssignments.FirstOrDefault()!.Branch!.BranchName));
 
-        // User -> AdminAccountDetailDto (cho AdminAccountsController)
-        CreateMap<User, AdminAccountDetailDto>()
-            .ForMember(d => d.Roles, o => o.MapFrom(s => s.Roles.Select(r => new AdminRoleDto
-            {
-                RoleId = r.RoleId,
-                RoleName = r.RoleName,
-                Description = r.Description
-            }).ToList()))
-            .ForMember(d => d.PermissionCodes, o => o.MapFrom(s => s.UserPermissions
-                .Where(up => up.IsGranted != false)
-                .Select(up => up.Permission != null ? up.Permission.PermissionCode : "")
-                .Where(c => !string.IsNullOrEmpty(c))
-                .Distinct()
-                .ToList()))
-            .ForMember(d => d.BranchId, o => o.MapFrom(s =>
-                s.StaffAssignments != null && s.StaffAssignments.Any()
-                    ? s.StaffAssignments.First().BranchId
-                    : (Guid?)null))
-            .ForMember(d => d.BranchName, o => o.MapFrom(s =>
-                s.StaffAssignments != null && s.StaffAssignments.Any()
-                    ? s.StaffAssignments.First().Branch!.BranchName
-                    : null));
+
 
         // SystemNotification -> SystemNotificationDto
         CreateMap<SystemNotification, SystemNotificationDto>()
