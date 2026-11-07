@@ -631,7 +631,13 @@ public class OwnerStaffController : ControllerBase
                 });
             }
 
-            staffRole = await GetOrCreateRoleAsync(dto.DefaultRoleType);
+            var roleNameToSearch = dto.DefaultRoleType;
+            if (roleNameToSearch.Equals("SalesStaff", StringComparison.OrdinalIgnoreCase))
+                roleNameToSearch = "Sales Staff";
+            if (roleNameToSearch.Equals("InventoryStaff", StringComparison.OrdinalIgnoreCase))
+                roleNameToSearch = "Inventory Staff";
+
+            staffRole = await GetOrCreateRoleAsync(roleNameToSearch);
             await _context.Entry(staffRole).Collection(r => r.Permissions).LoadAsync();
 
             var rolePermissionCodes = staffRole.Permissions
@@ -984,6 +990,7 @@ public class OwnerStaffController : ControllerBase
         // Thực hiện soft delete
         staff.Status = "DELETED";
         staff.IsActive = 0;
+        staff.IsVerified = false; // Không thể login nữa
         staff.DeletedAt = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified);
         await _context.SaveChangesAsync();
 
@@ -1034,7 +1041,8 @@ public class OwnerStaffController : ControllerBase
         var deletedUsers = await _context.Users
             .Where(u => (staffUserIds.Contains(u.UserId) || u.CreatedBy == ownerId.Value)
                 && u.Status == "DELETED"
-                && u.DeletedAt != null)
+                && u.DeletedAt != null
+                && u.DeletedAt > DateTime.UtcNow.AddDays(-retentionDays)) // còn trong thời hạn retention
             .ToListAsync();
 
         var result = deletedUsers.Select(u => new DeletedStaffDto
@@ -1086,9 +1094,10 @@ public class OwnerStaffController : ControllerBase
         if (staff == null)
             return NotFound(new ApiResponse<object> { Success = false, Message = "Nhân viên không tồn tại hoặc chưa bị xóa." });
 
-        // Khôi phục
+        // Khôi phục: đưa về trạng thái ACTIVE (kèm IsActive=1)
         staff.Status = "ACTIVE";
         staff.IsActive = 1;
+        staff.IsVerified = true; // Cho phép login lại
         staff.DeletedAt = null;
         await _context.SaveChangesAsync();
 
@@ -1124,7 +1133,8 @@ public class OwnerStaffController : ControllerBase
             return NotFound(new ApiResponse<object> { Success = false, Message = "Nhân viên không tồn tại hoặc không thuộc chi nhánh này." });
 
         var staff = await _context.Users
-            .FirstOrDefaultAsync(u => u.UserId == id && u.Status == "DELETED");
+            .FirstOrDefaultAsync(u => u.UserId == id
+                && (u.Status == "DELETED" || u.Status == "INACTIVE" || u.Status == "PERMANENT_DELETED"));
 
         if (staff == null)
             return NotFound(new ApiResponse<object> { Success = false, Message = "Nhân viên không tồn tại hoặc chưa bị xóa." });
@@ -1138,6 +1148,7 @@ public class OwnerStaffController : ControllerBase
         staff.PasswordHash = "PERMANENTLY_DELETED";
         staff.Status = "PERMANENT_DELETED";
         staff.IsActive = 0;
+        staff.DeletedAt = null; // Đã xóa vĩnh viễn → không còn nằm trong retention list
         // UserId, CreatedBy, CreatedAt giữ nguyên → audit trail vẫn đầy đủ
 
         await _context.SaveChangesAsync();
