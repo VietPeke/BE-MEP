@@ -13,8 +13,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.Extensions.Configuration;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Moq;
 using Xunit;
 
@@ -37,7 +35,7 @@ namespace MEP_Management_System.Tests.Controllers
 
         private OwnerStaffController CreateController(MEPDatabaseContext context, Guid? userId = null, Guid? branchId = null, string role = "Owner")
         {
-            var controller = new OwnerStaffController(context, _mockBranchAccessor.Object, new Mock<IConfiguration>().Object);
+            var controller = new OwnerStaffController(context, _mockBranchAccessor.Object);
 
             var claims = new List<Claim>();
             if (userId.HasValue)

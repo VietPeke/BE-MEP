@@ -1823,8 +1823,7 @@ public virtual DbSet<SupplierPayment> SupplierPayments { get; set; }
             entity.Property(e => e.BranchId)
                 .HasColumnName("branch_id");
             entity.Property(e => e.CategoryId)
-                .HasColumnName("category_id")
-                .IsRequired(false);
+                .HasColumnName("category_id");
             entity.Property(e => e.SupplierId)
                 .HasColumnName("supplier_id");
             entity.Property(e => e.Amount)
@@ -1881,7 +1880,7 @@ public virtual DbSet<SupplierPayment> SupplierPayments { get; set; }
             entity.HasOne(d => d.Category)
                 .WithMany(p => p.ExpenseVouchers)
                 .HasForeignKey(d => d.CategoryId)
-                .OnDelete(DeleteBehavior.SetNull)
+                .OnDelete(DeleteBehavior.Restrict)
                 .HasConstraintName("expense_vouchers_category_id_fkey");
 
             entity.HasOne(d => d.Supplier)
