@@ -60,10 +60,6 @@ public class AdminAccountsController : ControllerBase
 
     private async Task<AdminAccountDetailDto> MapToDtoAsync(User user)
     {
-        var assignment = await _context.StaffAssignments
-            .Include(sa => sa.Branch)
-            .FirstOrDefaultAsync(sa => sa.UserId == user.UserId);
-
         return new AdminAccountDetailDto
         {
             UserId = user.UserId,
@@ -91,9 +87,7 @@ public class AdminAccountsController : ControllerBase
                 .Select(up => up.Permission?.PermissionCode ?? "")
                 .Where(c => !string.IsNullOrEmpty(c))
                 .Distinct()
-                .ToList(),
-            BranchId = assignment?.BranchId,
-            BranchName = assignment?.Branch?.BranchName
+                .ToList()
         };
     }
 
@@ -194,16 +188,16 @@ public class AdminAccountsController : ControllerBase
         if (!string.IsNullOrWhiteSpace(status))
         {
             if (status.Equals("active", StringComparison.OrdinalIgnoreCase))
-                query = query.Where(u => (u.Status.ToUpper() == "ACTIVE" || u.Status == null) && u.IsActive == 1);
+                query = query.Where(u => u.Status == "ACTIVE" && u.IsActive == 1);
             else if (status.Equals("suspended", StringComparison.OrdinalIgnoreCase))
-                query = query.Where(u => u.Status.ToUpper() == "SUSPENDED" || (u.IsActive == 0 && u.Status.ToUpper() != "DELETED" && u.Status.ToUpper() != "PERMANENT_DELETED"));
+                query = query.Where(u => u.Status == "SUSPENDED" || u.IsActive == 0 && u.Status != "DELETED");
             else if (status.Equals("deleted", StringComparison.OrdinalIgnoreCase))
-                query = query.Where(u => u.Status.ToUpper() == "DELETED" || u.Status.ToUpper() == "PERMANENT_DELETED");
+                query = query.Where(u => u.Status == "DELETED");
         }
         else
         {
             // Mặc định không hiện user đã xóa mềm
-            query = query.Where(u => u.Status.ToUpper() != "DELETED" && u.Status.ToUpper() != "PERMANENT_DELETED");
+            query = query.Where(u => u.Status != "DELETED");
         }
 
         // Search
