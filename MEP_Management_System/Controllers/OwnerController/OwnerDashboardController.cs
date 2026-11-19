@@ -18,8 +18,6 @@ namespace MEP_Management_System.Controllers.OwnerController;
 [Tags("Owner Dashboard")]
 public class OwnerDashboardController : ControllerBase
 {
-    private static readonly string[] CompletedStatuses = { "COMPLETED", "Completed", "PAID", "Paid", "DONE", "Done" };
-
     private readonly MEPDatabaseContext _context;
     private readonly ICurrentBranchAccessor _currentBranch;
     private readonly CustomerDebtService _customerDebtService;
@@ -118,23 +116,23 @@ public class OwnerDashboardController : ControllerBase
 
         var customerDebtSummary = new DashboardDebtSummaryDto
         {
-            CustomerCount = debtMap.Count(kv => kv.Value > 0),
-            TotalDebt = debtMap.Values.Sum(),
+            CustomerCount = activeCustomerCount,
+            TotalDebt = activeCustomerTotalDebt,
             OverdueCustomerCount = overdueCount,
             OverdueDebt = overdueDebtSum
         };
 
-        var topProductsByRevenue = await _context.InvoiceItems
+        var topProductsByRevenue = await _context.OrderItems
             .AsNoTracking()
-            .Where(ii => ii.Invoice.Order.BranchId == branchId.Value
-                         && CompletedStatuses.Contains(ii.Invoice.Status)
-                         && ii.Invoice.CreatedAt.HasValue && ii.Invoice.CreatedAt >= last30Days && ii.Invoice.CreatedAt < now)
-            .GroupBy(ii => new
+            .Where(oi => oi.Order != null && oi.Order.BranchId == branchId.Value
+                         && (oi.Order.Status == "COMPLETED" || oi.Order.Status == "Completed")
+                         && oi.Order.CreatedAt.HasValue && oi.Order.CreatedAt >= last30Days && oi.Order.CreatedAt < now)
+            .GroupBy(oi => new
             {
-                ii.BranchProduct.ProductId,
-                ii.BranchProduct.Product.ProductCode,
-                ii.BranchProduct.Product.ProductName,
-                ii.BranchProduct.Product.CategoryName
+                oi.BranchProduct.ProductId,
+                oi.BranchProduct.Product.ProductCode,
+                oi.BranchProduct.Product.ProductName,
+                oi.BranchProduct.Product.CategoryName
             })
             .Select(g => new DashboardProductPerformanceDto
             {
@@ -167,7 +165,7 @@ public class OwnerDashboardController : ControllerBase
         var topCustomers = await _context.Orders
             .AsNoTracking()
             .Where(o => o.BranchId == branchId.Value && o.CustomerId != null
-                        && CompletedStatuses.Contains(o.Status)
+                        && (o.Status == "COMPLETED" || o.Status == "Completed")
                         && o.CreatedAt.HasValue && o.CreatedAt >= last30Days && o.CreatedAt < now)
             .GroupBy(o => new { o.CustomerId, o.Customer!.CustomerName, o.Customer!.PhoneNumber, o.Customer!.Email })
             .Select(g => new DashboardCustomerPerformanceDto
@@ -192,7 +190,7 @@ public class OwnerDashboardController : ControllerBase
         var expenseByCategory = await _context.ExpenseVouchers
             .AsNoTracking()
             .Where(ev => ev.BranchId == branchId.Value
-                         && CompletedStatuses.Contains(ev.Status)
+                         && (ev.Status == "COMPLETED" || ev.Status == "Completed")
                          && ev.CreatedAt.HasValue && ev.CreatedAt >= last30Days && ev.CreatedAt < now)
             .GroupBy(ev => ev.Category.CategoryName)
             .Select(g => new DashboardExpenseCategoryDto
@@ -208,7 +206,6 @@ public class OwnerDashboardController : ControllerBase
         var paymentsBreakdown = await _context.Payments
             .AsNoTracking()
             .Where(p => p.BranchId == branchId.Value && p.Status == "Confirmed"
-                        && CompletedStatuses.Contains(p.Invoice.Status)
                         && p.PaidAt.HasValue && p.PaidAt >= last30Days && p.PaidAt < now)
             .GroupBy(p => p.Method)
             .Select(g => new
@@ -246,13 +243,12 @@ public class OwnerDashboardController : ControllerBase
 
         var branchRevenueTrend = await BuildTrendAsync(_context.Invoices.AsNoTracking()
             .Where(i => i.Order.BranchId == branchId.Value
-                        && CompletedStatuses.Contains(i.Status)
                         && i.CreatedAt.HasValue && i.CreatedAt >= twelveMonthsAgo && i.CreatedAt < now),
             "CreatedAt", "TotalAmount", twelveMonthsAgo, now, 12);
 
         var branchExpenseTrend = await BuildTrendAsync(_context.ExpenseVouchers.AsNoTracking()
             .Where(ev => ev.BranchId == branchId.Value
-                         && CompletedStatuses.Contains(ev.Status)
+                         && (ev.Status == "COMPLETED" || ev.Status == "Completed")
                          && ev.CreatedAt.HasValue && ev.CreatedAt >= twelveMonthsAgo && ev.CreatedAt < now),
             "CreatedAt", "Amount", twelveMonthsAgo, now, 12);
 
@@ -271,47 +267,11 @@ public class OwnerDashboardController : ControllerBase
 
         var pendingOrderCount = await _context.Orders.AsNoTracking()
             .Where(o => o.BranchId == branchId.Value
-                        && o.Status == "PENDING"
+                        && o.Status == "Pending"
                         && o.CreatedAt.HasValue && o.CreatedAt >= last30Days && o.CreatedAt < now)
             .CountAsync();
 
-        var pendingOrderAmount = await _context.Orders.AsNoTracking()
-            .Where(o => o.BranchId == branchId.Value
-                        && o.Status == "PENDING"
-                        && o.CreatedAt.HasValue && o.CreatedAt >= last30Days && o.CreatedAt < now)
-            .SumAsync(o => (decimal?)o.TotalAmount) ?? 0m;
-
-        var totalSupplierDebt = await _context.StockTickets.AsNoTracking()
-            .Where(st => st.BranchId == branchId.Value && st.TicketType == "PURCHASE"
-                         && CompletedStatuses.Contains(st.Status)
-                         && st.CreatedAt.HasValue && st.CreatedAt >= yearStart && st.CreatedAt < now)
-            .SumAsync(st => (decimal?)st.TotalAmount) ?? 0m;
-
-        var supplierDebtPaidLast30Days = await _context.SupplierPayments.AsNoTracking()
-            .Where(sp => sp.CreatedAt >= last30Days && sp.CreatedAt < now && sp.IsDeleted == 0)
-            .SumAsync(sp => (decimal?)sp.Amount) ?? 0m;
-
-        // Refund trend 12 months
-        var refundTrend = await BuildRefundTrendAsync(branchId.Value, twelveMonthsAgo, now);
-
-        // Recent system events
-        var recentEvents = await _context.SystemLogs.AsNoTracking()
-            .Include(l => l.User)
-            .OrderByDescending(l => l.Timestamp)
-            .Take(20)
-            .Select(l => new SystemEventDto
-            {
-                LogId = l.LogId,
-                Action = l.Action,
-                Description = l.Description,
-                TableName = l.TableName,
-                Level = l.Level,
-                Source = l.Source,
-                UserName = l.User != null ? l.User.FullName : null,
-                IpAddress = l.IpAddress,
-                Timestamp = l.Timestamp
-            })
-            .ToListAsync();
+        var totalSupplierDebt = 0m; // supplier debt summary not directly available per branch in current data model
 
         var lowStockProducts = await _context.BranchProducts.AsNoTracking()
             .Where(bp => bp.BranchId == branchId.Value && bp.IsActive == 1
@@ -330,12 +290,12 @@ public class OwnerDashboardController : ControllerBase
             .Take(10)
             .ToListAsync();
 
-        var categoryPerformance = await _context.InvoiceItems
+        var categoryPerformance = await _context.OrderItems
             .AsNoTracking()
-            .Where(ii => ii.Invoice.Order.BranchId == branchId.Value
-                         && CompletedStatuses.Contains(ii.Invoice.Status)
-                         && ii.Invoice.CreatedAt.HasValue && ii.Invoice.CreatedAt >= last30Days && ii.Invoice.CreatedAt < now)
-            .GroupBy(ii => ii.BranchProduct.Product.CategoryName)
+            .Where(oi => oi.Order != null && oi.Order.BranchId == branchId.Value
+                         && (oi.Order.Status == "COMPLETED" || oi.Order.Status == "Completed")
+                         && oi.Order.CreatedAt.HasValue && oi.Order.CreatedAt >= last30Days && oi.Order.CreatedAt < now)
+            .GroupBy(oi => oi.BranchProduct.Product.CategoryName)
             .Select(g => new DashboardCategoryPerformanceDto
             {
                 CategoryName = g.Key ?? string.Empty,
@@ -356,8 +316,6 @@ public class OwnerDashboardController : ControllerBase
             .ToList();
 
         var customerGrowthTrend = await BuildCustomerGrowthTrendAsync(branchId.Value, twelveMonthsAgo, now);
-
-        var revenueTrendLast30Days = await BuildDailyRevenueTrendAsync(branchId.Value, last30Days, now);
 
         return Ok(new DashboardOverviewDto
         {
@@ -415,20 +373,17 @@ public class OwnerDashboardController : ControllerBase
             AverageDailyRevenueLast7Days = Math.Round(revenueLast7Days.revenue / 7m, 2),
             AverageDailyRevenueLast30Days = Math.Round(revenueLast30Days.revenue / 30m, 2),
             PendingExpenseCount = await _context.ExpenseVouchers.AsNoTracking()
-                .Where(ev => ev.BranchId == branchId.Value && ev.Status == "PENDING" && ev.CreatedAt.HasValue && ev.CreatedAt >= last30Days && ev.CreatedAt < now)
+                .Where(ev => ev.BranchId == branchId.Value && ev.Status == "Pending" && ev.CreatedAt.HasValue && ev.CreatedAt >= last30Days && ev.CreatedAt < now)
                 .CountAsync(),
             PendingExpenseAmount = await _context.ExpenseVouchers.AsNoTracking()
-                .Where(ev => ev.BranchId == branchId.Value && ev.Status == "PENDING" && ev.CreatedAt.HasValue && ev.CreatedAt >= last30Days && ev.CreatedAt < now)
+                .Where(ev => ev.BranchId == branchId.Value && ev.Status == "Pending" && ev.CreatedAt.HasValue && ev.CreatedAt >= last30Days && ev.CreatedAt < now)
                 .SumAsync(ev => (decimal?)ev.Amount) ?? 0m,
             PendingOrderCount = pendingOrderCount,
-            PendingOrderAmount = pendingOrderAmount,
             TotalSupplierDebt = totalSupplierDebt,
-            SupplierDebtPaidLast30Days = supplierDebtPaidLast30Days,
-            RepaymentCoverageRatio = totalSupplierDebt > 0 ? Math.Round(activeCustomerTotalDebt / totalSupplierDebt * 100m, 2) : 0m,
+            RepaymentCoverageRatio = 0m,
             RevenueTrendLast12Months = branchRevenueTrend,
-            RevenueTrendLast30Days = revenueTrendLast30Days,
             ExpenseTrendLast12Months = branchExpenseTrend,
-            RefundTrendLast12Months = refundTrend,
+            RefundTrendLast12Months = new List<DashboardTrendPointDto>(),
             CustomerGrowthTrendLast12Months = customerGrowthTrend,
             TopProductsByRevenue = topProductsByRevenue,
             TopProductsByProfit = topProductsByProfit,
@@ -440,7 +395,7 @@ public class OwnerDashboardController : ControllerBase
             {
                 new() { BranchId = branch.BranchId, BranchName = branch.BranchName ?? string.Empty, Revenue = revenueLast30Days.revenue, OrderCount = revenueLast30Days.orderCount }
             },
-            RecentSystemEvents = recentEvents
+            RecentSystemEvents = new List<SystemEventDto>()
         });
 
         async Task<List<DashboardTrendPointDto>> BuildCustomerGrowthTrendAsync(Guid branch, DateTime from, DateTime to)
@@ -469,54 +424,44 @@ public class OwnerDashboardController : ControllerBase
 
         async Task<(decimal revenue, int orderCount, decimal averageOrderValue, decimal expense, decimal refund, decimal cogs, decimal profit, decimal grossMargin, DashboardPaymentBreakdownDto paymentBreakdown)> GetBranchMetricsAsync(Guid branch, DateTime start, DateTime end)
         {
-            // Revenue = sum of confirmed payment amounts for COMPLETED invoices only
-            var confirmedPayments = await _context.Payments
+            var revenue = await _context.Invoices
                 .AsNoTracking()
-                .Where(p => p.BranchId == branch && p.Status == "Confirmed"
-                            && CompletedStatuses.Contains(p.Invoice.Status)
-                            && p.PaidAt.HasValue && p.PaidAt >= start && p.PaidAt < end)
-                .Select(p => new { p.InvoiceId, p.Amount, p.Method })
-                .ToListAsync();
+                .Where(i => i.Order.BranchId == branch
+                            && i.Status == "COMPLETED"
+                            && i.Payments.Any(p => p.Status == "Confirmed" && p.PaidAt.HasValue && p.PaidAt >= start && p.PaidAt < end))
+                .SumAsync(i => (decimal?)i.TotalAmount) ?? 0m;
 
-            var revenue = confirmedPayments
-                .GroupBy(p => p.InvoiceId)
-                .Sum(g => g.Sum(p => p.Amount));
-
-            // Order count = distinct orders with confirmed payments in period
-            var orderCount = await _context.Payments
+            var orderCount = await _context.Orders
                 .AsNoTracking()
-                .Where(p => p.BranchId == branch && p.Status == "Confirmed"
-                            && CompletedStatuses.Contains(p.Invoice.Status)
-                            && p.PaidAt.HasValue && p.PaidAt >= start && p.PaidAt < end)
-                .Select(p => p.Invoice.Order.OrderId)
-                .Distinct()
+                .Where(o => o.BranchId == branch
+                            && o.Status == "COMPLETED"
+                            && o.CreatedAt.HasValue && o.CreatedAt >= start && o.CreatedAt < end)
                 .CountAsync();
 
             var expense = await _context.ExpenseVouchers
                 .AsNoTracking()
                 .Where(ev => ev.BranchId == branch
-                             && CompletedStatuses.Contains(ev.Status)
+                             && ev.Status == "COMPLETED"
                              && ev.CreatedAt.HasValue && ev.CreatedAt >= start && ev.CreatedAt < end)
                 .SumAsync(ev => (decimal?)ev.Amount) ?? 0m;
 
             var refund = await _context.ReturnOrders
                 .AsNoTracking()
                 .Where(ro => ro.Order.BranchId == branch
-                             && CompletedStatuses.Contains(ro.Status)
+                             && ro.Status == "COMPLETED"
                              && ro.CreatedAt.HasValue && ro.CreatedAt >= start && ro.CreatedAt < end)
                 .SumAsync(ro => (decimal?)ro.RefundAmount) ?? 0m;
 
-            var cogs = await _context.InvoiceItems
+            var cogs = await _context.OrderItems
                 .AsNoTracking()
-                .Where(ii => ii.Invoice.Order.BranchId == branch
-                             && CompletedStatuses.Contains(ii.Invoice.Status)
-                             && ii.Invoice.Payments.Any(p => p.Status == "Confirmed" && p.PaidAt.HasValue && p.PaidAt >= start && p.PaidAt < end))
-                .SumAsync(ii => (decimal?)ii.Quantity * ii.BranchProduct.CostPrice) ?? 0m;
+                .Where(oi => oi.Order.BranchId == branch
+                             && oi.Order.Invoice.Status == "COMPLETED"
+                             && oi.Order.Invoice.Payments.Any(p => p.Status == "Confirmed" && p.PaidAt.HasValue && p.PaidAt >= start && p.PaidAt < end))
+                .SumAsync(oi => (decimal?)oi.Quantity * oi.BranchProduct.CostPrice) ?? 0m;
 
             var paymentBreakdown = await _context.Payments
                 .AsNoTracking()
                 .Where(p => p.BranchId == branch && p.Status == "Confirmed"
-                            && CompletedStatuses.Contains(p.Invoice.Status)
                             && p.PaidAt.HasValue && p.PaidAt >= start && p.PaidAt < end)
                 .GroupBy(p => p.Method)
                 .Select(g => new
@@ -583,71 +528,6 @@ public class OwnerDashboardController : ControllerBase
                     return new DashboardTrendPointDto
                     {
                         Period = date.ToString("yyyy-MM", System.Globalization.CultureInfo.InvariantCulture),
-                        Amount = amount,
-                        Count = 0
-                    };
-                })
-                .ToList();
-        }
-
-        async Task<List<DashboardTrendPointDto>> BuildRefundTrendAsync(Guid branch, DateTime from, DateTime to)
-        {
-            var data = await _context.ReturnOrders.AsNoTracking()
-                .Where(ro => ro.Order.BranchId == branch
-                             && CompletedStatuses.Contains(ro.Status)
-                             && ro.CreatedAt.HasValue && ro.CreatedAt >= from && ro.CreatedAt < to)
-                .Select(ro => new { ro.CreatedAt, ro.RefundAmount })
-                .ToListAsync();
-
-            var grouped = data
-                .Where(x => x.CreatedAt.HasValue)
-                .GroupBy(x => new { Year = x.CreatedAt!.Value.Year, Month = x.CreatedAt!.Value.Month })
-                .ToDictionary(g => new { g.Key.Year, g.Key.Month }, g => g.Sum(x => x.RefundAmount));
-
-            return Enumerable.Range(0, 12)
-                .Select(offset => from.AddMonths(offset))
-                .Select(date =>
-                {
-                    var periodKey = new { date.Year, date.Month };
-                    grouped.TryGetValue(periodKey, out var amount);
-                    return new DashboardTrendPointDto
-                    {
-                        Period = date.ToString("yyyy-MM", System.Globalization.CultureInfo.InvariantCulture),
-                        Amount = amount,
-                        Count = 0
-                    };
-                })
-                .ToList();
-        }
-
-        async Task<List<DashboardTrendPointDto>> BuildDailyRevenueTrendAsync(Guid branch, DateTime from, DateTime to)
-        {
-            var data = await _context.Payments
-                .AsNoTracking()
-                .Where(p => p.Invoice != null
-                            && p.Invoice.Order.BranchId == branch
-                            && p.Status == "Confirmed"
-                            && p.PaidAt.HasValue && p.PaidAt >= from && p.PaidAt < to)
-                .Select(p => new { p.PaidAt, p.Invoice.TotalAmount, p.InvoiceId })
-                .ToListAsync();
-
-            var grouped = data
-                .Where(x => x.PaidAt.HasValue)
-                .GroupBy(x => x.PaidAt!.Value.Date)
-                .ToDictionary(
-                    g => g.Key,
-                    g => g.Select(x => new { x.InvoiceId, x.TotalAmount }).Distinct().Sum(x => x.TotalAmount)
-                );
-
-            var days = (to.Date - from.Date).Days;
-            return Enumerable.Range(0, days)
-                .Select(offset => from.Date.AddDays(offset))
-                .Select(date =>
-                {
-                    grouped.TryGetValue(date, out var amount);
-                    return new DashboardTrendPointDto
-                    {
-                        Period = date.ToString("dd/MM", System.Globalization.CultureInfo.InvariantCulture),
                         Amount = amount,
                         Count = 0
                     };
@@ -797,12 +677,12 @@ public class OwnerDashboardController : ControllerBase
         var end = to ?? now;
         limit = Math.Clamp(limit, 1, 50);
 
-        var products = await _context.InvoiceItems
+        var products = await _context.OrderItems
             .AsNoTracking()
-            .Where(ii => ii.Invoice.Order.BranchId == branchId.Value
-                         && CompletedStatuses.Contains(ii.Invoice.Status)
-                         && ii.Invoice.CreatedAt.HasValue && ii.Invoice.CreatedAt >= start && ii.Invoice.CreatedAt < end)
-            .GroupBy(ii => new { ii.BranchProduct.ProductId, ii.BranchProduct.Product.ProductName, ii.BranchProduct.Product.ProductCode })
+            .Where(oi => oi.Order != null && oi.Order.BranchId == branchId.Value
+                         && (oi.Order.Status == "COMPLETED" || oi.Order.Status == "Completed")
+                         && oi.Order.CreatedAt.HasValue && oi.Order.CreatedAt >= start && oi.Order.CreatedAt < end)
+            .GroupBy(oi => new { oi.BranchProduct.ProductId, oi.BranchProduct.Product.ProductName, oi.BranchProduct.Product.ProductCode })
             .Select(g => new
             {
                 g.Key.ProductId,
@@ -830,48 +710,6 @@ public class OwnerDashboardController : ControllerBase
             .ToList();
 
         return Ok(new { success = true, data = sorted });
-    }
-
-    /// <summary>
-    /// GET /api/owner/dashboard/debug-payments?days=30
-    /// Debug: liệt kê chi tiết từng payment để kiểm tra số liệu.
-    /// </summary>
-    [HttpGet("debug-payments")]
-    public async Task<IActionResult> DebugPayments([FromQuery] int days = 30)
-    {
-        var branchId = _currentBranch.GetBranchId();
-        if (branchId == null) return Unauthorized(new ApiResponse<object> { Success = false, Message = "Branch required." });
-
-        var now = VietnamTime.Now;
-        var from = now.AddDays(-days);
-
-        var payments = await _context.Payments
-            .AsNoTracking()
-            .Where(p => p.BranchId == branchId.Value && p.Status == "Confirmed"
-                        && CompletedStatuses.Contains(p.Invoice.Status)
-                        && p.PaidAt.HasValue && p.PaidAt >= from && p.PaidAt < now)
-            .OrderByDescending(p => p.PaidAt)
-            .Select(p => new
-            {
-                p.PaymentId,
-                p.Method,
-                p.Amount,
-                p.PaidAt,
-                p.CreatedAt,
-                InvoiceCode = p.Invoice != null ? p.Invoice.InvoiceCode : null,
-                OrderCode = p.Invoice != null && p.Invoice.Order != null ? p.Invoice.Order.OrderCode : null,
-                OrderStatus = p.Invoice != null && p.Invoice.Order != null ? p.Invoice.Order.Status : null,
-                InvoiceStatus = p.Invoice != null ? p.Invoice.Status : null
-            })
-            .ToListAsync();
-
-        return Ok(new
-        {
-            success = true,
-            total = payments.Count,
-            byMethod = payments.GroupBy(p => p.Method).ToDictionary(g => g.Key, g => new { count = g.Count(), amount = g.Sum(p => p.Amount) }),
-            payments
-        });
     }
 
     private Guid GetCurrentUserId()

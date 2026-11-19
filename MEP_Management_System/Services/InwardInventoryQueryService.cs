@@ -91,9 +91,7 @@ namespace MEP_Management_System.Services
                 ConfirmedBy = st.ConfirmedBy,
                 CancelledBy = st.CancelledBy,
                 CancelReason = st.CancelReason,
-                CostPrice = st.TicketType == "CUSTOMER_RETURN"
-                    ? 0
-                    : st.StockTicketItems?.Sum(i => i.BranchProduct?.CostPrice ?? 0) ?? 0,
+                CostPrice = st.StockTicketItems?.Sum(i => i.BranchProduct?.CostPrice ?? 0) ?? 0,
                 Items = st.StockTicketItems?.Select(i => new InwardInventoryItemResponseDto
                 {
                     TicketItemId = i.TicketItemId,
@@ -104,9 +102,7 @@ namespace MEP_Management_System.Services
                     SystemQuantity = i.SystemQuantity,
                     Quantity = i.Discrepancy,
                     ActualQuantity = i.ActualQuantity,
-                    CostPrice = st.TicketType == "CUSTOMER_RETURN"
-                        ? 0
-                        : i.BranchProduct?.CostPrice ?? 0
+                    CostPrice = i.BranchProduct?.CostPrice ?? 0
                 }).ToList() ?? new List<InwardInventoryItemResponseDto>()
             };
         }

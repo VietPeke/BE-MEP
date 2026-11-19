@@ -51,40 +51,11 @@ namespace MEP_Management_System.Controllers.InventoryController
             return User.IsInRole("Owner");
         }
 
-        private async Task TryWriteSystemLog(Guid userId, string action, string tableName,
-            string entityType, Guid entityId, string description)
-        {
-            try
-            {
-                var log = new SystemLog
-                {
-                    LogId = Guid.NewGuid(),
-                    UserId = userId,
-                    Action = action,
-                    TableName = tableName,
-                    EntityType = entityType,
-                    EntityId = entityId,
-                    Description = description,
-                    Level = "INFO",
-                    Source = "OutwardInventoryController",
-                    Timestamp = DateTime.UtcNow
-                };
-                _context.SystemLogs.Add(log);
-                await _context.SaveChangesAsync();
-            }
-            catch
-            {
-                // Silent — không làm fail request chính
-            }
-        }
-
         private async Task BroadcastAndSaveNotification(
             NotificationType type,
             Guid branchId,
             string message,
-            Guid triggeredByUserId,
-            Guid? referenceId = null,
-            string? referenceType = null)
+            Guid triggeredByUserId)
         {
             var notif = new Notification
             {
@@ -93,8 +64,6 @@ namespace MEP_Management_System.Controllers.InventoryController
                 RecipientUserId = null, // Broadcast
                 BranchId = branchId,
                 InventoryCheckId = null,
-                ReferenceId = referenceId,
-                ReferenceType = referenceType,
                 TriggeredByUserId = triggeredByUserId,
                 Message = message,
                 IsRead = false,
@@ -113,9 +82,7 @@ namespace MEP_Management_System.Controllers.InventoryController
                 notif.Message,
                 notif.CreatedAt,
                 notif.IsRead,
-                notif.InventoryCheckId,
-                notif.ReferenceId,
-                notif.ReferenceType
+                notif.InventoryCheckId
             });
         }
 
@@ -202,18 +169,10 @@ namespace MEP_Management_System.Controllers.InventoryController
                     query = query.Where(st => st.TicketType != null && st.TicketType.ToLower() == ticketType.Trim().ToLower());
 
                 if (fromDate.HasValue)
-                {
-                    var localFrom = DateTime.SpecifyKind(fromDate.Value.Date, DateTimeKind.Unspecified);
-                    var utcFrom = TimeZoneInfo.ConvertTimeToUtc(localFrom, VietnamTime.Tz);
-                    query = query.Where(st => st.CreatedAt >= utcFrom);
-                }
+                    query = query.Where(st => st.CreatedAt >= fromDate.Value);
 
                 if (toDate.HasValue)
-                {
-                    var localTo = DateTime.SpecifyKind(toDate.Value.Date.AddDays(1), DateTimeKind.Unspecified);
-                    var utcTo = TimeZoneInfo.ConvertTimeToUtc(localTo, VietnamTime.Tz);
-                    query = query.Where(st => st.CreatedAt < utcTo);
-                }
+                    query = query.Where(st => st.CreatedAt <= toDate.Value.AddDays(1));
 
                 query = query.OrderByDescending(st => st.CreatedAt);
 
@@ -469,7 +428,7 @@ namespace MEP_Management_System.Controllers.InventoryController
                             SystemQuantity = bp.ActualStock,
                             ActualQuantity = bp.ActualStock,
                             Discrepancy = item.Quantity,
-                            UnitPrice = item.UnitPrice ?? bp.CostPrice
+                            UnitPrice = item.UnitPrice
                         };
 
                         _context.StockTicketItems.Add(ticketItem);
@@ -478,22 +437,12 @@ namespace MEP_Management_System.Controllers.InventoryController
                     await _context.SaveChangesAsync();
                     await transaction.CommitAsync();
 
-                    await TryWriteSystemLog(
-                        currentUserId.Value,
-                        "CREATE_OUTWARD_INVENTORY",
-                        "stock_tickets",
-                        "OutwardInventory",
-                        stockTicket.StockTicketId,
-                        $"Tạo phiếu xuất kho {stockTicket.TicketCode}");
-
                     var userName = User.FindFirst("name")?.Value ?? User.FindFirst(ClaimTypes.Name)?.Value ?? "Người dùng";
                     await BroadcastAndSaveNotification(
                         NotificationType.Created,
                         resolvedBranchId.Value,
                         $"{userName} vừa tạo phiếu xuất kho {stockTicket.TicketCode}.",
-                        currentUserId.Value,
-                        stockTicket.StockTicketId,
-                        "OutwardInventory");
+                        currentUserId.Value);
 
                     return Ok(new ApiResponse<object>
                     {
@@ -589,14 +538,6 @@ namespace MEP_Management_System.Controllers.InventoryController
                         stockTicket.Notes = dto.Reason;
 
                     await _context.SaveChangesAsync();
-
-                    await TryWriteSystemLog(
-                        stockTicket.UserId,
-                        "UPDATE_OUTWARD_INVENTORY",
-                        "stock_tickets",
-                        "OutwardInventory",
-                        stockTicket.StockTicketId,
-                        $"Cập nhật phiếu xuất kho {stockTicket.TicketCode}");
 
                     return Ok(new ApiResponse<OutwardInventoryResponseDto>
                     {
@@ -805,14 +746,6 @@ namespace MEP_Management_System.Controllers.InventoryController
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
 
-                await TryWriteSystemLog(
-                    currentUserId!.Value,
-                    "CONFIRM_OUTWARD_INVENTORY",
-                    "stock_tickets",
-                    "OutwardInventory",
-                    stockTicket.StockTicketId,
-                    $"Xác nhận phiếu xuất kho {stockTicket.TicketCode} - {stockTicket.StockTicketItems.Count} sản phẩm");
-
                 return Ok(new ApiResponse<object>
                 {
                     Success = true,
@@ -929,14 +862,6 @@ namespace MEP_Management_System.Controllers.InventoryController
 
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
-
-                await TryWriteSystemLog(
-                    currentUserId!.Value,
-                    "CANCEL_OUTWARD_INVENTORY",
-                    "stock_tickets",
-                    "OutwardInventory",
-                    stockTicket.StockTicketId,
-                    $"Hủy phiếu xuất kho {stockTicket.TicketCode} - Lý do: {dto?.CancelReason ?? "—"}");
 
                 return Ok(new ApiResponse<object>
                 {

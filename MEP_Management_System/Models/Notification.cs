@@ -30,14 +30,9 @@ public class Notification
     public Guid? InventoryCheckId { get; set; }
 
     /// <summary>
-    /// ID tham chiếu tổng quát đến entity liên quan (vd: StockTicketId, OrderId, ...)
+    /// ID tham chiếu linh hoạt (dùng chung cho Inward/Outward/InventoryCheck)
     /// </summary>
     public Guid? ReferenceId { get; set; }
-
-    /// <summary>
-    /// Loại entity tham chiếu: InwardInventory, OutwardInventory, InventoryCheck, Order, ...
-    /// </summary>
-    public string? ReferenceType { get; set; }
 
     /// <summary>
     /// ID người tạo ra thông báo này

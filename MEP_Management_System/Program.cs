@@ -299,7 +299,6 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-
 app.Run();
 
 public class UtcDateTimeConverter : System.Text.Json.Serialization.JsonConverter<DateTime>
