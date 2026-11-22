@@ -7,7 +7,6 @@ public class CreateNotificationRequest
     public string Target { get; set; } = "ALL"; // ALL / OWNER / STAFF / COMMUNITY
     public bool IsUrgent { get; set; } = false;
     public DateTime? ScheduledAt { get; set; }
-    public Guid? BranchId { get; set; }
 }
 
 public class UpdateNotificationRequest
@@ -17,5 +16,4 @@ public class UpdateNotificationRequest
     public string? Target { get; set; }
     public bool? IsUrgent { get; set; }
     public DateTime? ScheduledAt { get; set; }
-    public Guid? BranchId { get; set; }
 }

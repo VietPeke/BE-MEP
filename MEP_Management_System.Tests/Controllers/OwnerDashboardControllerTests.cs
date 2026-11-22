@@ -32,8 +32,7 @@ namespace MEP_Management_System.Tests.Controllers
 
         private OwnerDashboardController CreateController(MEPDatabaseContext context, Guid? userId = null)
         {
-            var customerDebtService = new MEP_Management_System.Services.CustomerDebtService(context);
-            var controller = new OwnerDashboardController(context, _mockCurrentBranch.Object, customerDebtService);
+            var controller = new OwnerDashboardController(context, _mockCurrentBranch.Object);
 
             var claims = new List<Claim>();
             if (userId.HasValue)
@@ -110,9 +109,8 @@ namespace MEP_Management_System.Tests.Controllers
             context.Customers.Add(new Customer { CustomerId = Guid.NewGuid(), BranchId = branchId, Status = 1, CurrentDebt = 50000, CustomerName = "Test" });
             
             var orderId = Guid.NewGuid();
-            var order = new Order { OrderId = orderId, OrderCode = "O1", BranchId = branchId, Status = "COMPLETED", TotalAmount = 150000, CreatedAt = DateTime.UtcNow.AddDays(-1) };
-            context.Orders.Add(order);
-            context.Invoices.Add(new Invoice { InvoiceId = Guid.NewGuid(), InvoiceCode = "I1", OrderId = orderId, Order = order, Status = "COMPLETED", TotalAmount = 150000, CreatedAt = DateTime.UtcNow.AddDays(-1) });
+            context.Orders.Add(new Order { OrderId = orderId, OrderCode = "O1", BranchId = branchId, Status = "COMPLETED", TotalAmount = 150000, CreatedAt = DateTime.UtcNow.AddDays(-1) });
+            context.Invoices.Add(new Invoice { InvoiceId = Guid.NewGuid(), InvoiceCode = "I1", OrderId = orderId, Status = "COMPLETED", TotalAmount = 150000, CreatedAt = DateTime.UtcNow.AddDays(-1) });
             
             await context.SaveChangesAsync();
 

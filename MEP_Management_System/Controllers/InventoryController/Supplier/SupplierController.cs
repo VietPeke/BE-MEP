@@ -18,13 +18,11 @@ namespace MEP_Management_System.Controllers.InventoryController.Supplier
     {
         private readonly MEPDatabaseContext _context;
         private readonly ISupplierDebtService _supplierDebtService;
-        private readonly ICurrentBranchAccessor _currentBranch;
 
-        public SupplierController(MEPDatabaseContext context, ISupplierDebtService supplierDebtService, ICurrentBranchAccessor currentBranch)
+        public SupplierController(MEPDatabaseContext context, ISupplierDebtService supplierDebtService)
         {
             _context = context;
             _supplierDebtService = supplierDebtService;
-            _currentBranch = currentBranch;
         }
 
         // Helper: chuyển mã hiển thị từ GUID (8 ký tự đầu)
@@ -46,10 +44,7 @@ namespace MEP_Management_System.Controllers.InventoryController.Supplier
         {
             try
             {
-                var branchId = _currentBranch.GetBranchId();
-                if (branchId == null) return BadRequest(new ApiResponse<object> { Success = false, Message = "Không xác định được chi nhánh." });
-
-                var query = _context.Suppliers.Where(s => s.BranchId == branchId).AsQueryable();
+                var query = _context.Suppliers.AsQueryable();
 
                 // Filter search
                 if (!string.IsNullOrWhiteSpace(p.SearchTerm))
@@ -83,9 +78,9 @@ namespace MEP_Management_System.Controllers.InventoryController.Supplier
                     .Take(p.PageSize)
                     .ToListAsync();
 
-                // Distinct groups toàn hệ thống của chi nhánh này
+                // Distinct groups toàn hệ thống
                 var distinctGroups = await _context.Suppliers
-                    .Where(s => s.BranchId == branchId && s.GroupName != null)
+                    .Where(s => s.GroupName != null)
                     .Select(s => s.GroupName!)
                     .Distinct()
                     .OrderBy(g => g)
@@ -159,11 +154,8 @@ namespace MEP_Management_System.Controllers.InventoryController.Supplier
         {
             try
             {
-                var branchId = _currentBranch.GetBranchId();
-                if (branchId == null) return BadRequest(new ApiResponse<object> { Success = false, Message = "Không xác định được chi nhánh." });
-
                 var s = await _context.Suppliers
-                    .FirstOrDefaultAsync(x => x.SupplierId == id && x.BranchId == branchId);
+                    .FirstOrDefaultAsync(x => x.SupplierId == id);
 
                 if (s == null)
                     return NotFound(new DTOs.ApiResponse<object>
@@ -232,12 +224,11 @@ namespace MEP_Management_System.Controllers.InventoryController.Supplier
                     });
                 }
 
-                var branchId = _currentBranch.GetBranchId();
-                if (branchId == null) return BadRequest(new ApiResponse<object> { Success = false, Message = "Không xác định được chi nhánh." });
-
                 var inputName = req.SupplierName.Trim();
+
+                // So sánh trùng tên có kèm theo Trim() cả 2 đầu ở dưới DB
                 var exists = await _context.Suppliers
-                    .AnyAsync(x => x.SupplierName.Trim().ToLower() == inputName.ToLower() && x.BranchId == branchId);
+                    .AnyAsync(x => x.SupplierName.Trim().ToLower() == inputName.ToLower());
                 if (exists)
                     return BadRequest(new ApiResponse<object>
                     {
@@ -269,7 +260,6 @@ namespace MEP_Management_System.Controllers.InventoryController.Supplier
                     Address = req.Address?.Trim(),
                     Notes = req.Notes?.Trim(),
                     Status = req.Status,
-                    BranchId = branchId,
                     CreatedAt = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified),
                     CreatedBy = currentUserId
                 };
@@ -336,10 +326,7 @@ namespace MEP_Management_System.Controllers.InventoryController.Supplier
                     });
                 }
 
-                var branchId = _currentBranch.GetBranchId();
-                if (branchId == null) return BadRequest(new ApiResponse<object> { Success = false, Message = "Không xác định được chi nhánh." });
-
-                var s = await _context.Suppliers.FirstOrDefaultAsync(x => x.SupplierId == id && x.BranchId == branchId);
+                var s = await _context.Suppliers.FirstOrDefaultAsync(x => x.SupplierId == id);
                 if (s == null)
                     return NotFound(new ApiResponse<object>
                     {
@@ -352,7 +339,7 @@ namespace MEP_Management_System.Controllers.InventoryController.Supplier
 
                 // Kiểm tra trùng tên với nhà cung cấp khác có kèm theo Trim()
                 var nameExists = await _context.Suppliers
-                    .AnyAsync(x => x.SupplierId != id && x.BranchId == branchId
+                    .AnyAsync(x => x.SupplierId != id
                                 && x.SupplierName.Trim().ToLower() == inputName.ToLower());
                 if (nameExists)
                     return BadRequest(new ApiResponse<object>
@@ -434,10 +421,7 @@ namespace MEP_Management_System.Controllers.InventoryController.Supplier
         {
             try
             {
-                var branchId = _currentBranch.GetBranchId();
-                if (branchId == null) return BadRequest(new ApiResponse<object> { Success = false, Message = "Không xác định được chi nhánh." });
-
-                var s = await _context.Suppliers.FirstOrDefaultAsync(x => x.SupplierId == id && x.BranchId == branchId);
+                var s = await _context.Suppliers.FirstOrDefaultAsync(x => x.SupplierId == id);
                 if (s == null)
                     return NotFound(new ApiResponse<object>
                     {
@@ -489,10 +473,7 @@ namespace MEP_Management_System.Controllers.InventoryController.Supplier
                     });
                 }
 
-                var branchId = _currentBranch.GetBranchId();
-                if (branchId == null) return BadRequest(new ApiResponse<object> { Success = false, Message = "Không xác định được chi nhánh." });
-
-                var s = await _context.Suppliers.FirstOrDefaultAsync(x => x.SupplierId == id && x.BranchId == branchId);
+                var s = await _context.Suppliers.FirstOrDefaultAsync(x => x.SupplierId == id);
                 if (s == null)
                     return NotFound(new ApiResponse<object>
                     {

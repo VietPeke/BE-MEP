@@ -33,8 +33,7 @@ namespace MEP_Management_System.Tests.Controllers
 
         private PrintingController CreateController(MEPDatabaseContext context, Guid? userId = null, Guid? branchId = null)
         {
-            var templateService = new MEP_Management_System.Services.InvoicePrintTemplateService(context);
-            var controller = new PrintingController(context, _mockMapper.Object, templateService);
+            var controller = new PrintingController(context, _mockMapper.Object);
 
             var claims = new List<Claim>();
             if (userId.HasValue)
