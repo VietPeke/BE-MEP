@@ -164,10 +164,18 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins(
+        // origins lấy từ config (env AllowedOrigins__0..N); fallback danh sách mặc định
+        var origins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>();
+        if (origins == null || origins.Length == 0)
+        {
+            origins = new[]
+            {
                 "http://localhost:3000",
+                "https://mep-fe.vercel.app",
                 "https://mep-retail-management-system.vercel.app"
-            )
+            };
+        }
+        policy.WithOrigins(origins)
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
