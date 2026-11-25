@@ -21,7 +21,7 @@ namespace MEP_Management_System.Controllers.OwnerController;
 [ApiController]
 [Route("api/owner/staffs")]
 [Tags("Quản lý Nhân viên (Owner)")]
-[Authorize(Roles = PermissionConstants.OWNER_ROLE)]
+[Authorize]
 public class OwnerStaffController : ControllerBase
 {
     private readonly MEPDatabaseContext _context;
@@ -64,6 +64,32 @@ public class OwnerStaffController : ControllerBase
     /// </summary>
     private async Task<OwnerStaffDto> MapToDto(User user)
     {
+        // Lay role permissions (khong bi deny)
+        var rolePermissionCodes = user.Roles
+            .SelectMany(r => r.Permissions)
+            .Select(p => p.PermissionCode)
+            .ToHashSet();
+
+        // Lay user permissions (explicit allow/deny)
+        var deniedCodes = user.UserPermissions
+            .Where(up => up.IsGranted == false)
+            .Select(up => up.Permission?.PermissionCode ?? "")
+            .Where(c => !string.IsNullOrEmpty(c))
+            .ToHashSet();
+
+        var allowedCodes = user.UserPermissions
+            .Where(up => up.IsGranted != false)
+            .Select(up => up.Permission?.PermissionCode ?? "")
+            .Where(c => !string.IsNullOrEmpty(c))
+            .ToHashSet();
+
+        // Merge: role permissions + explicit allows, minus explicit denies
+        var effectivePermissions = rolePermissionCodes
+            .Union(allowedCodes)
+            .Except(deniedCodes)
+            .Distinct()
+            .ToList();
+
         return new OwnerStaffDto
         {
             UserId = user.UserId,
@@ -71,10 +97,8 @@ public class OwnerStaffController : ControllerBase
             Email = user.Email,
             PhoneNumber = user.PhoneNumber,
             IsActive = user.IsActive,
-            PermissionCodes = user.UserPermissions
-                .Select(up => up.Permission?.PermissionCode ?? "")
-                .Where(c => !string.IsNullOrEmpty(c))
-                .ToList(),
+            PermissionCodes = effectivePermissions,
+            HasCustomPermissions = user.UserPermissions.Any(),
             Roles = user.Roles
                 .Select(r => r.RoleName)
                 .ToList()
@@ -140,6 +164,31 @@ public class OwnerStaffController : ControllerBase
 
         var missing = codeList.Where(c => !foundCodes.Contains(c)).ToList();
 
+        // Auto-create missing permissions
+        try
+        {
+            foreach (var code in missing)
+            {
+                var newPerm = new Permission
+                {
+                    PermissionId = Guid.NewGuid(),
+                    PermissionCode = code,
+                    PermissionName = code
+                };
+                _context.Permissions.Add(newPerm);
+                permissions.Add(newPerm);
+            }
+            if (missing.Any())
+            {
+                await _context.SaveChangesAsync();
+                missing.Clear();
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[WARN] Failed to auto-create permissions: {ex.Message}");
+        }
+
         return (permissions, missing);
     }
 
@@ -171,6 +220,7 @@ public class OwnerStaffController : ControllerBase
     /// Lấy danh sách nhân viên của chi nhánh hiện tại.
     /// </summary>
     [HttpGet]
+    [HasPermission(PermissionConstants.STAFF_VIEW)]
     public async Task<IActionResult> GetStaffs(
         [FromQuery] string? search,
         [FromQuery] bool? isActive,
@@ -235,7 +285,7 @@ public class OwnerStaffController : ControllerBase
 
         var query = _context.Users
             .Include(u => u.UserPermissions).ThenInclude(up => up.Permission)
-            .Include(u => u.Roles)
+            .Include(u => u.Roles).ThenInclude(r => r.Permissions)
             .Where(u => staffUserIds.Contains(u.UserId)
                 && u.UserId != ownerId.Value
                 // Loại trừ Admin/Owner - chỉ hiển thị staff (Sale, Kho, etc.)
@@ -252,7 +302,7 @@ public class OwnerStaffController : ControllerBase
         {
             query = _context.Users
                 .Include(u => u.UserPermissions).ThenInclude(up => up.Permission)
-                .Include(u => u.Roles)
+                .Include(u => u.Roles).ThenInclude(r => r.Permissions)
                 .Where(u => staffUserIds.Contains(u.UserId)
                     && u.Status == "DELETED"
                     && u.UserId != ownerId.Value
@@ -405,14 +455,33 @@ public class OwnerStaffController : ControllerBase
                 Message = "Không thể xác định người dùng từ token."
             });
 
+        var branchId = GetCurrentBranchId();
+        if (!branchId.HasValue)
+            return BadRequest(new ApiResponse<object>
+            {
+                Success = false,
+                Message = "Không tìm thấy thông tin chi nhánh."
+            });
+
+        // Kiem tra nhan vien co thuoc chi nhanh hien tai khong
+        var isInBranch = await _context.StaffAssignments
+            .AnyAsync(sa => sa.UserId == id && sa.BranchId == branchId.Value);
+
+        if (!isInBranch)
+            return NotFound(new ApiResponse<object>
+            {
+                Success = false,
+                Message = "Nhân viên không tồn tại hoặc không thuộc chi nhánh này."
+            });
+
         var staff = await _context.Users
-            .FirstOrDefaultAsync(u => u.UserId == id && u.CreatedBy == ownerId.Value);
+            .FirstOrDefaultAsync(u => u.UserId == id);
 
         if (staff == null)
             return NotFound(new ApiResponse<object>
             {
                 Success = false,
-                Message = "Nhân viên không tồn tại hoặc không thuộc quyền quản lý của bạn."
+                Message = "Nhân viên không tồn tại."
             });
 
         // Đếm số lượng liên kết trong các bảng
@@ -468,12 +537,63 @@ public class OwnerStaffController : ControllerBase
     }
     #endregion
 
+    #region GET /api/owner/staffs/role-permissions
+
+    /// <summary>
+    /// Lấy danh sach quyen mac dinh cua cac Role SalesStaff & InventoryStaff.
+    /// Dung de dong bo voi cau hinh tu Admin.
+    /// </summary>
+    [HttpGet("role-permissions")]
+    [HasPermission(PermissionConstants.STAFF_VIEW)]
+    public async Task<IActionResult> GetRolePermissions()
+    {
+        var roles = await _context.Roles
+            .Include(r => r.Permissions)
+            .Where(r => r.RoleName == "SalesStaff" || r.RoleName == "InventoryStaff"
+                || r.RoleName == "Sales Staff" || r.RoleName == "Inventory Staff")
+            .ToListAsync();
+
+        var result = new Dictionary<string, List<string>>();
+        foreach (var role in roles)
+        {
+            var key = role.RoleName switch
+            {
+                "Sales Staff" => "SalesStaff",
+                "Inventory Staff" => "InventoryStaff",
+                _ => role.RoleName
+            };
+            if (!result.ContainsKey(key))
+            {
+                result[key] = role.Permissions.Select(p => p.PermissionCode).ToList();
+            }
+            else
+            {
+                // Merge permissions from both role name variants
+                var existing = result[key];
+                foreach (var code in role.Permissions.Select(p => p.PermissionCode))
+                {
+                    if (!existing.Contains(code)) existing.Add(code);
+                }
+            }
+        }
+
+        return Ok(new ApiResponse<object>
+        {
+            Success = true,
+            Message = "Danh sach quyen mac dinh cua cac Role.",
+            Data = result
+        });
+    }
+
+    #endregion
+
     #region GET /api/owner/staffs/available-permissions
 
     /// <summary>
     /// Lấy danh sách quyền hạn khả dụng từ DB.
     /// </summary>
     [HttpGet("available-permissions")]
+    [HasPermission(PermissionConstants.STAFF_VIEW)]
     public async Task<IActionResult> GetAvailablePermissions()
     {
         var permissions = await _context.Permissions
@@ -502,6 +622,7 @@ public class OwnerStaffController : ControllerBase
     /// Lấy chi tiết một nhân viên.
     /// </summary>
     [HttpGet("{id:guid}")]
+    [HasPermission(PermissionConstants.STAFF_VIEW)]
     public async Task<IActionResult> GetStaffById(Guid id)
     {
         var ownerId = GetCurrentUserId();
@@ -533,7 +654,7 @@ public class OwnerStaffController : ControllerBase
 
         var staff = await _context.Users
             .Include(u => u.UserPermissions).ThenInclude(up => up.Permission)
-            .Include(u => u.Roles)
+            .Include(u => u.Roles).ThenInclude(r => r.Permissions)
             .FirstOrDefaultAsync(u => u.UserId == id);
 
         if (staff == null)
@@ -559,6 +680,7 @@ public class OwnerStaffController : ControllerBase
     /// Tạo nhân viên mới - Tự động gán chi nhánh của Owner.
     /// </summary>
     [HttpPost]
+    [HasPermission(PermissionConstants.STAFF_CREATE)]
     public async Task<IActionResult> CreateStaff([FromBody] CreateStaffWithPermissionRequest dto)
     {
         var ownerId = GetCurrentUserId();
@@ -569,20 +691,18 @@ public class OwnerStaffController : ControllerBase
                 Message = "Không thể xác định người dùng từ token."
             });
 
-        // Lấy branchId của Owner để gán cho nhân viên mới
-        var ownerBranchId = await _context.StaffAssignments
-            .Where(sa => sa.UserId == ownerId.Value)
-            .Select(sa => sa.BranchId)
-            .FirstOrDefaultAsync();
-
-        if (ownerBranchId == Guid.Empty)
+        // Lấy branchId hiện tại (từ Header/Token) để gán cho nhân viên mới
+        var currentBranchId = GetCurrentBranchId();
+        if (currentBranchId == null || currentBranchId == Guid.Empty)
         {
             return BadRequest(new ApiResponse<object>
             {
                 Success = false,
-                Message = "Owner chưa được gán chi nhánh. Vui lòng liên hệ quản trị viên."
+                Message = "Không xác định được chi nhánh hiện tại. Vui lòng chọn chi nhánh."
             });
         }
+        
+        var ownerBranchId = currentBranchId.Value;
 
         if (string.IsNullOrWhiteSpace(dto.Username) ||
             string.IsNullOrWhiteSpace(dto.Email) ||
@@ -630,22 +750,18 @@ public class OwnerStaffController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(dto.DefaultRoleType))
         {
-            var validRoles = new[] { "SalesStaff", "InventoryStaff", "Staff" };
+            var validRoles = new[] { "SalesStaff", "InventoryStaff" };
             if (!validRoles.Contains(dto.DefaultRoleType.Trim(), StringComparer.OrdinalIgnoreCase))
             {
                 return BadRequest(new ApiResponse<object>
                 {
                     Success = false,
                     Message = "DefaultRoleType không hợp lệ.",
-                    Errors = new List<string> { "Chỉ được phép: SalesStaff, InventoryStaff, Staff." }
+                    Errors = new List<string> { "Chỉ được phép: SalesStaff, InventoryStaff." }
                 });
             }
 
             var roleNameToSearch = dto.DefaultRoleType;
-            if (roleNameToSearch.Equals("SalesStaff", StringComparison.OrdinalIgnoreCase))
-                roleNameToSearch = "Sales Staff";
-            if (roleNameToSearch.Equals("InventoryStaff", StringComparison.OrdinalIgnoreCase))
-                roleNameToSearch = "Inventory Staff";
 
             staffRole = await GetOrCreateRoleAsync(roleNameToSearch);
             await _context.Entry(staffRole).Collection(r => r.Permissions).LoadAsync();
@@ -731,7 +847,7 @@ public class OwnerStaffController : ControllerBase
 
             var createdUser = await _context.Users
                 .Include(u => u.UserPermissions).ThenInclude(up => up.Permission)
-                .Include(u => u.Roles)
+                .Include(u => u.Roles).ThenInclude(r => r.Permissions)
                 .FirstAsync(u => u.UserId == user.UserId);
 
             return CreatedAtAction(nameof(GetStaffById), new { id = user.UserId },
@@ -757,6 +873,7 @@ public class OwnerStaffController : ControllerBase
     /// Cập nhật thông tin nhân viên (Không đổi chi nhánh).
     /// </summary>
     [HttpPut("{id:guid}")]
+    [HasPermission(PermissionConstants.STAFF_UPDATE)]
     public async Task<IActionResult> UpdateStaff(Guid id, [FromBody] UpdateStaffPermissionRequest dto)
     {
         var ownerId = GetCurrentUserId();
@@ -767,18 +884,35 @@ public class OwnerStaffController : ControllerBase
                 Message = "Không thể xác định người dùng từ token."
             });
 
+        var branchId = GetCurrentBranchId();
+        if (!branchId.HasValue)
+            return BadRequest(new ApiResponse<object>
+            {
+                Success = false,
+                Message = "Không tìm thấy thông tin chi nhánh."
+            });
+
+        // Kiem tra nhan vien co thuoc chi nhanh hien tai khong (qua StaffAssignments)
+        var isInBranch = await _context.StaffAssignments
+            .AnyAsync(sa => sa.UserId == id && sa.BranchId == branchId.Value);
+
+        if (!isInBranch)
+            return NotFound(new ApiResponse<object>
+            {
+                Success = false,
+                Message = "Nhân viên không tồn tại hoặc không thuộc quyền quản lý."
+            });
+
         var staff = await _context.Users
             .Include(u => u.UserPermissions)
-            .Include(u => u.Roles)
-            .ThenInclude(r => r.Permissions)
-            .FirstOrDefaultAsync(u =>
-                u.UserId == id && u.CreatedBy == ownerId.Value);
+            .Include(u => u.Roles).ThenInclude(r => r.Permissions)
+            .FirstOrDefaultAsync(u => u.UserId == id);
 
         if (staff == null)
             return NotFound(new ApiResponse<object>
             {
                 Success = false,
-                Message = "Nhân viên không tồn tại hoặc không thuộc quyền quản lý."
+                Message = "Nhân viên không tồn tại."
             });
 
         if (!string.IsNullOrWhiteSpace(dto.Email))
@@ -822,12 +956,9 @@ public class OwnerStaffController : ControllerBase
 
             if (missingCodes.Any())
             {
-                return BadRequest(new ApiResponse<object>
-                {
-                    Success = false,
-                    Message = "Một số mã quyền không tồn tại.",
-                    Errors = missingCodes.Select(c => $"PermissionCode không tồn tại: {c}").ToList()
-                });
+                // Log warning nhung van tiep tuc, bo qua cac ma khong ton tai
+                System.Diagnostics.Debug.WriteLine($"[WARN] Permission codes not found: {string.Join(", ", missingCodes)}");
+                validPermissions = validPermissions.Where(p => !missingCodes.Contains(p.PermissionCode, StringComparer.OrdinalIgnoreCase)).ToList();
             }
 
             // Get role permission codes for this staff
@@ -837,6 +968,35 @@ public class OwnerStaffController : ControllerBase
                 .ToHashSet();
 
             var requestedCodes = validPermissions.Select(p => p.PermissionCode).ToHashSet();
+
+            // Auto-include VIEW permissions khi co quyen thao tac lien quan
+            var actionToViewPrefixes = new Dictionary<string, string[]>
+            {
+                { "STOCK_INWARD_CREATE", new[] { "STOCK_INWARD_" } },
+                { "STOCK_OUTWARD_CREATE", new[] { "STOCK_OUTWARD_" } },
+                { "STOCK_CHECK_VIEW", new[] { "STOCK_CHECK_" } },
+                { "PRODUCT_VIEW", new[] { "PRODUCT_" } },
+                { "SALE_VIEW", new[] { "SALE_", "CUSTOMER_", "PAYMENT_" } },
+                { "SUPPLIER_VIEW", new[] { "SUPPLIER_" } },
+                { "EXPENSE_VIEW", new[] { "EXPENSE_" } },
+                { "STAFF_VIEW", new[] { "STAFF_" } },
+            };
+
+            foreach (var kvp in actionToViewPrefixes)
+            {
+                var viewCode = kvp.Key;
+                var actionPrefixes = kvp.Value;
+                if (!requestedCodes.Contains(viewCode) &&
+                    requestedCodes.Any(rc => actionPrefixes.Any(ap => rc.StartsWith(ap))))
+                {
+                    var viewPerm = await _context.Permissions.FirstOrDefaultAsync(p => p.PermissionCode == viewCode);
+                    if (viewPerm != null)
+                    {
+                        validPermissions.Add(viewPerm);
+                        requestedCodes.Add(viewCode);
+                    }
+                }
+            }
 
             // Remove all existing user permissions
             _context.UserPermissions.RemoveRange(staff.UserPermissions);
@@ -854,8 +1014,29 @@ public class OwnerStaffController : ControllerBase
             }
 
             // Add explicit denies (IsGranted = false) for role permissions NOT in the requested list
+            // NHUNG: khong deny quyen VIEW neu user van con quyen thao tac lien quan
+            var viewToActionPrefixes = new Dictionary<string, string[]>
+            {
+                { "STOCK_INWARD_CREATE", new[] { "STOCK_INWARD_" } },
+                { "STOCK_OUTWARD_CREATE", new[] { "STOCK_OUTWARD_" } },
+                { "STOCK_CHECK_VIEW", new[] { "STOCK_CHECK_" } },
+                { "PRODUCT_VIEW", new[] { "PRODUCT_" } },
+                { "SALE_VIEW", new[] { "SALE_", "CUSTOMER_", "PAYMENT_" } },
+                { "SUPPLIER_VIEW", new[] { "SUPPLIER_" } },
+                { "EXPENSE_VIEW", new[] { "EXPENSE_" } },
+                { "STAFF_VIEW", new[] { "STAFF_" } },
+            };
+
             foreach (var rolePermCode in rolePermissionCodes.Where(c => !requestedCodes.Contains(c)))
             {
+                // Kiem tra xem co phai la quyen VIEW dang bi deny khong
+                var isViewBeingDenied = viewToActionPrefixes.TryGetValue(rolePermCode, out var actionPrefixes);
+                var hasRelatedAction = isViewBeingDenied && actionPrefixes != null &&
+                    requestedCodes.Any(rc => actionPrefixes.Any(ap => rc.StartsWith(ap)));
+
+                if (hasRelatedAction)
+                    continue; // Khong deny VIEW neu user van co quyen thao tac lien quan
+
                 var perm = await _context.Permissions.FirstOrDefaultAsync(p => p.PermissionCode == rolePermCode);
                 if (perm != null)
                 {
@@ -897,17 +1078,28 @@ public class OwnerStaffController : ControllerBase
     /// Thay đổi trạng thái hoạt động (Bật/Tắt) của tài khoản nhân viên.
     /// </summary>
     [HttpPatch("{id:guid}/toggle-status")]
+    [HasPermission(PermissionConstants.STAFF_UPDATE)]
     public async Task<IActionResult> ToggleStaffStatus(Guid id)
     {
         var ownerId = GetCurrentUserId();
         if (!ownerId.HasValue)
             return Unauthorized(new ApiResponse<object> { Success = false, Message = "Không thể xác định người dùng từ token." });
 
+        var branchId = GetCurrentBranchId();
+        if (!branchId.HasValue)
+            return BadRequest(new ApiResponse<object> { Success = false, Message = "Không tìm thấy thông tin chi nhánh." });
+
+        var isInBranch = await _context.StaffAssignments
+            .AnyAsync(sa => sa.UserId == id && sa.BranchId == branchId.Value);
+
+        if (!isInBranch)
+            return NotFound(new ApiResponse<object> { Success = false, Message = "Nhân viên không tồn tại hoặc không thuộc chi nhánh này." });
+
         var staff = await _context.Users
-            .FirstOrDefaultAsync(u => u.UserId == id && u.CreatedBy == ownerId.Value);
+            .FirstOrDefaultAsync(u => u.UserId == id && u.Status != "DELETED");
 
         if (staff == null)
-            return NotFound(new ApiResponse<object> { Success = false, Message = "Nhân viên không tồn tại hoặc không thuộc quyền quản lý của bạn." });
+            return NotFound(new ApiResponse<object> { Success = false, Message = "Nhân viên đã bị xóa hoặc không tồn tại." });
 
         if (staff.UserId == ownerId.Value)
             return BadRequest(new ApiResponse<object> { Success = false, Message = "Bạn không thể tự khóa/mở khóa tài khoản của chính mình." });
@@ -947,6 +1139,7 @@ public class OwnerStaffController : ControllerBase
     /// Xóa mềm nhân viên (Soft Delete - chuyển Status = DELETED, IsActive = 0).
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [HasPermission(PermissionConstants.STAFF_DELETE)]
     public async Task<IActionResult> DeleteStaff(Guid id)
     {
         var ownerId = GetCurrentUserId();
@@ -1007,6 +1200,19 @@ public class OwnerStaffController : ControllerBase
         staff.IsActive = 0;
         staff.IsVerified = false; // Không thể login nữa
         staff.DeletedAt = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified);
+
+        // Giải phóng các trường unique (Email, Username, Phone) để có thể tạo lại tài khoản
+        var shortId = staff.UserId.ToString().Substring(0, 6);
+        
+        var newEmail = $"del_{shortId}_{staff.Email}";
+        if (newEmail.Length > 150) newEmail = newEmail.Substring(0, 150);
+        staff.Email = newEmail;
+        
+        var newUsername = $"del_{shortId}_{staff.Username}";
+        if (newUsername.Length > 50) newUsername = newUsername.Substring(0, 50);
+        staff.Username = newUsername;
+
+        staff.PhoneNumber = null;
         await _context.SaveChangesAsync();
 
         var response = new ApiResponse<object>
@@ -1035,6 +1241,7 @@ public class OwnerStaffController : ControllerBase
     /// Lấy danh sách nhân viên đã xóa mềm của chi nhánh hiện tại.
     /// </summary>
     [HttpGet("deleted")]
+    [HasPermission(PermissionConstants.STAFF_VIEW)]
     public async Task<IActionResult> GetDeletedStaffs()
     {
         var ownerId = GetCurrentUserId();
@@ -1086,6 +1293,7 @@ public class OwnerStaffController : ControllerBase
     /// Khôi phục nhân viên đã xóa mềm.
     /// </summary>
     [HttpPost("{id:guid}/restore")]
+    [HasPermission(PermissionConstants.STAFF_DELETE)]
     public async Task<IActionResult> RestoreStaff(Guid id)
     {
         var ownerId = GetCurrentUserId();
@@ -1130,6 +1338,7 @@ public class OwnerStaffController : ControllerBase
     /// Sau khi anonymize, UserId vẫn giữ nguyên nên các hoá đơn/đơn hàng vẫn trỏ đúng.
     /// </summary>
     [HttpDelete("{id:guid}/permanent")]
+    [HasPermission(PermissionConstants.STAFF_DELETE)]
     public async Task<IActionResult> PermanentDeleteStaff(Guid id)
     {
         var ownerId = GetCurrentUserId();

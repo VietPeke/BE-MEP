@@ -8,13 +8,13 @@ public partial class Product
 {
     public Guid ProductId { get; set; }
 
-    public string ProductCode { get; set; } = null!;
+    public string ProductCode { get; set; } = "";
 
-    public string ProductName { get; set; } = null!;
+    public string ProductName { get; set; } = "";
 
     public string? Barcode { get; set; }
 
-    public string BaseUnit { get; set; } = null!;
+    public string BaseUnit { get; set; } = "";
 
     public string? Specification { get; set; }
 
@@ -62,6 +62,9 @@ public partial class Product
 
     /// <summary>Trạng thái sản phẩm: 1=Active, 0=Inactive. Mặc định 1 (theo SRS).</summary>
     public short? Status { get; set; }
+
+    /// <summary>Tenant identifier: Các sản phẩm được cô lập theo chi nhánh/cửa hàng.</summary>
+    public Guid? BranchId { get; set; }
 
     public Guid? CreatedBy { get; set; }
 

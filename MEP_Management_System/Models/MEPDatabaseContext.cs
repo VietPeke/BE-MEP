@@ -28,6 +28,8 @@ public virtual DbSet<Customer> Customers { get; set; }
     public virtual DbSet<Invoice> Invoices { get; set; }
 
     public virtual DbSet<InvoiceItem> InvoiceItems { get; set; }
+    public virtual DbSet<InventoryLedger> InventoryLedgers { get; set; }
+    public virtual DbSet<DailyStockSnapshot> DailyStockSnapshots { get; set; }
 
     public virtual DbSet<OrderDiscountTier> OrderDiscountTiers { get; set; }
 
@@ -207,7 +209,7 @@ public virtual DbSet<SupplierPayment> SupplierPayments { get; set; }
                 .HasColumnType("timestamp without time zone")
                 .HasColumnName("estimated_out_at");
             entity.Property(e => e.IsActive)
-                .HasDefaultValue((short)1)
+                .HasDefaultValue((short)0)
                 .HasColumnName("is_active");
             entity.Property(e => e.MaximumStock)
                 .HasPrecision(10, 2)
@@ -528,6 +530,7 @@ public virtual DbSet<SupplierPayment> SupplierPayments { get; set; }
                 .HasPrecision(15, 2)
                 .HasColumnName("total_amount");
             entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.ShiftId).HasColumnName("shift_id");
             entity.Property(e => e.InvoiceCode)
                 .HasMaxLength(50)
                 .HasColumnName("invoice_code");
@@ -565,6 +568,11 @@ public virtual DbSet<SupplierPayment> SupplierPayments { get; set; }
                 .HasForeignKey(d => d.UserId)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("invoices_user_id_fkey");
+
+            entity.HasOne(d => d.Shift).WithMany(p => p.Invoices)
+                .HasForeignKey(d => d.ShiftId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("invoices_shift_id_fkey");
         });
 
         modelBuilder.Entity<InvoiceItem>(entity =>
@@ -584,6 +592,9 @@ public virtual DbSet<SupplierPayment> SupplierPayments { get; set; }
             entity.Property(e => e.SellPrice)
                 .HasPrecision(15, 2)
                 .HasColumnName("sell_price");
+            entity.Property(e => e.CostPrice)
+                .HasPrecision(18, 4)
+                .HasColumnName("cost_price");
 
             entity.HasOne(d => d.BranchProduct).WithMany()
                 .HasForeignKey(d => d.BranchProductId)
@@ -1182,6 +1193,7 @@ public virtual DbSet<SupplierPayment> SupplierPayments { get; set; }
                 .HasColumnName("created_at");
             entity.Property(e => e.UserId).HasColumnName("user_id");
             entity.Property(e => e.SupplierId).HasColumnName("supplier_id");
+            entity.Property(e => e.InwardTicketId).HasColumnName("inward_ticket_id");
             entity.Property(e => e.TotalAmount)
                 .HasPrecision(15, 2)
                 .HasColumnName("total_amount");
@@ -1233,6 +1245,12 @@ public virtual DbSet<SupplierPayment> SupplierPayments { get; set; }
                 .HasForeignKey(d => d.CancelledBy)
                 .OnDelete(DeleteBehavior.SetNull)
                 .HasConstraintName("stock_tickets_cancelled_by_fkey");
+
+            // Self-referencing: phiếu xuất → phiếu nhập gốc
+            entity.HasOne(d => d.InwardTicket).WithMany(p => p.OutwardTickets)
+                .HasForeignKey(d => d.InwardTicketId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("stock_tickets_inward_ticket_id_fkey");
         });
 
         modelBuilder.Entity<StockTicketItem>(entity =>
@@ -1252,9 +1270,13 @@ public virtual DbSet<SupplierPayment> SupplierPayments { get; set; }
                 .HasPrecision(10, 2)
                 .HasColumnName("discrepancy");
             entity.Property(e => e.StockTicketId).HasColumnName("stock_ticket_id");
+            entity.Property(e => e.InwardTicketItemId).HasColumnName("inward_ticket_item_id");
             entity.Property(e => e.SystemQuantity)
                 .HasPrecision(10, 2)
                 .HasColumnName("system_quantity");
+            entity.Property(e => e.UnitPrice)
+                .HasPrecision(15, 2)
+                .HasColumnName("unit_price");
 
             entity.HasOne(d => d.BranchProduct).WithMany(p => p.StockTicketItems)
                 .HasForeignKey(d => d.BranchProductId)
@@ -1264,6 +1286,12 @@ public virtual DbSet<SupplierPayment> SupplierPayments { get; set; }
             entity.HasOne(d => d.StockTicket).WithMany(p => p.StockTicketItems)
                 .HasForeignKey(d => d.StockTicketId)
                 .HasConstraintName("stock_ticket_items_stock_ticket_id_fkey");
+
+            // Self-referencing: dòng xuất → dòng nhập gốc
+            entity.HasOne(d => d.InwardTicketItem).WithMany(p => p.OutwardTicketItems)
+                .HasForeignKey(d => d.InwardTicketItemId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("stock_ticket_items_inward_ticket_item_id_fkey");
         });
 
         modelBuilder.Entity<Supplier>(entity =>
@@ -1702,10 +1730,22 @@ public virtual DbSet<SupplierPayment> SupplierPayments { get; set; }
                 .HasDefaultValue(0)
                 .HasColumnName("total_orders");
             entity.Property(e => e.Note).HasColumnName("note");
+            entity.Property(e => e.ClosedByUserId).HasColumnName("closed_by_user_id");
+            entity.Property(e => e.ForceCloseReason)
+                .HasMaxLength(500)
+                .HasColumnName("force_close_reason");
             entity.HasIndex(e => e.ShiftCode).IsUnique().HasDatabaseName("ix_shifts_code");
+            entity.HasIndex(e => e.BranchId)
+                .HasDatabaseName("ix_shifts_one_open_per_branch")
+                .HasFilter("status = 'OPEN'")
+                .IsUnique();
             entity.HasOne(d => d.User).WithMany(p => p.Shifts)
                 .HasForeignKey(d => d.UserId)
                 .HasConstraintName("shifts_user_id_fkey");
+            entity.HasOne(d => d.ClosedBy).WithMany()
+                .HasForeignKey(d => d.ClosedByUserId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("shifts_closed_by_user_id_fkey");
             entity.HasOne(d => d.Branch).WithMany(p => p.Shifts)
                 .HasForeignKey(d => d.BranchId)
                 .HasConstraintName("shifts_branch_id_fkey");
@@ -2291,6 +2331,48 @@ public virtual DbSet<SupplierPayment> SupplierPayments { get; set; }
             .HasIndex(e => new { e.BranchId, e.MinOrderValue })
             .IsUnique()
             .HasDatabaseName("ix_order_discount_tiers_branch_min_order");
+
+        // === Inventory Ledger (Nhật ký biến động kho) ===
+        modelBuilder.Entity<InventoryLedger>(entity =>
+        {
+            entity.HasKey(e => e.LedgerId).HasName("inventory_ledger_pkey");
+            entity.ToTable("inventory_ledger");
+
+            entity.Property(e => e.LedgerId).HasDefaultValueSql("uuid_generate_v4()").HasColumnName("ledger_id");
+            entity.Property(e => e.BranchId).HasColumnName("branch_id");
+            entity.Property(e => e.BranchProductId).HasColumnName("branch_product_id");
+            entity.Property(e => e.DocType).HasMaxLength(20).HasColumnName("doc_type");
+            entity.Property(e => e.DocId).HasColumnName("doc_id");
+            entity.Property(e => e.DocCode).HasMaxLength(50).HasColumnName("doc_code");
+            entity.Property(e => e.TransactionTime).HasColumnType("timestamp without time zone").HasColumnName("transaction_time");
+            entity.Property(e => e.QtyChange).HasPrecision(10, 2).HasColumnName("qty_change");
+            entity.Property(e => e.UnitCostPrice).HasPrecision(18, 4).HasColumnName("unit_cost_price");
+            entity.Property(e => e.TotalCostValue).HasPrecision(18, 4).HasColumnName("total_cost_value");
+            entity.Property(e => e.StockAfter).HasPrecision(10, 2).HasColumnName("stock_after");
+            entity.Property(e => e.AvgCostAfter).HasPrecision(18, 4).HasColumnName("avg_cost_after");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP").HasColumnType("timestamp without time zone").HasColumnName("created_at");
+
+            entity.HasIndex(e => new { e.BranchId, e.BranchProductId, e.TransactionTime }).HasDatabaseName("ix_ledger_branch_product_time");
+            entity.HasIndex(e => new { e.BranchId, e.TransactionTime }).HasDatabaseName("ix_ledger_branch_time");
+        });
+
+        // === Daily Stock Snapshots (Chốt tồn cuối ngày) ===
+        modelBuilder.Entity<DailyStockSnapshot>(entity =>
+        {
+            entity.HasKey(e => e.SnapshotId).HasName("daily_stock_snapshots_pkey");
+            entity.ToTable("daily_stock_snapshots");
+
+            entity.Property(e => e.SnapshotId).HasDefaultValueSql("uuid_generate_v4()").HasColumnName("snapshot_id");
+            entity.Property(e => e.SnapshotDate).HasColumnName("snapshot_date");
+            entity.Property(e => e.BranchId).HasColumnName("branch_id");
+            entity.Property(e => e.BranchProductId).HasColumnName("branch_product_id");
+            entity.Property(e => e.ClosingQuantity).HasPrecision(10, 2).HasColumnName("closing_quantity");
+            entity.Property(e => e.CostPrice).HasPrecision(18, 4).HasColumnName("cost_price");
+            entity.Property(e => e.ClosingValue).HasPrecision(18, 4).HasColumnName("closing_value");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP").HasColumnType("timestamp without time zone").HasColumnName("created_at");
+
+            entity.HasIndex(e => new { e.SnapshotDate, e.BranchId, e.BranchProductId }).IsUnique().HasDatabaseName("uk_daily_snapshot");
+        });
     }
 
     partial void OnModelCreatingPartial(ModelBuilder modelBuilder);

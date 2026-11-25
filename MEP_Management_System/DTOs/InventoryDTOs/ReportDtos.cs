@@ -71,6 +71,7 @@ public class StockMovementReportDto
 public class StockMovementItemDto
 {
     public Guid ProductId { get; set; }
+    public Guid BranchProductId { get; set; }
     public string ProductCode { get; set; } = null!;
     public string ProductName { get; set; } = null!;
     public string CategoryName { get; set; } = null!;
@@ -319,3 +320,30 @@ public class SupplierDetailRequestDto
 }
 
 #endregion
+
+public class StockLedgerRequestDto
+{
+    public DateTime? FromDate { get; set; }
+    public DateTime? ToDate { get; set; }
+    public int PageSize { get; set; } = 200;
+}
+
+public class StockLedgerDto
+{
+    public decimal OpeningStock { get; set; }
+    public decimal ClosingStock { get; set; }
+    public decimal TotalInQty { get; set; }
+    public decimal TotalOutQty { get; set; }
+    public List<StockLedgerEntryDto> Entries { get; set; } = new();
+}
+
+public class StockLedgerEntryDto
+{
+    public DateTime TransactionTime { get; set; }
+    public string DocCode { get; set; } = "";
+    public string DocType { get; set; } = "";
+    public decimal? UnitCostPrice { get; set; }
+    public decimal QtyIn { get; set; }
+    public decimal QtyOut { get; set; }
+    public decimal StockAfter { get; set; }
+}

@@ -29,16 +29,23 @@ namespace MEP_Management_System.Controllers.InventoryController
             return Guid.TryParse(userIdClaim, out Guid userId) ? userId : null;
         }
 
+        private Guid? GetCurrentBranchId()
+        {
+            var branchIdClaim = User.FindFirst("branchId")?.Value;
+            return Guid.TryParse(branchIdClaim, out Guid branchId) ? branchId : null;
+        }
+
         /// <summary>
         /// GET /api/locations - Lấy danh sách vị trí
         /// </summary>
         [HttpGet]
-        [HasPermission(PermissionConstants.LOCATION_VIEW)]
+        // Lookup API - dung cho dropdown chon vi tri trong form nhap/xuat san pham
         public async Task<IActionResult> GetLocations([FromQuery] bool? activeOnly = true)
         {
             try
             {
-                var query = _context.ProductLocations.AsQueryable();
+                var branchId = GetCurrentBranchId();
+                var query = _context.ProductLocations.Where(l => l.BranchId == branchId).AsQueryable();
 
                 if (activeOnly == true)
                 {
@@ -109,9 +116,11 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// POST /api/locations - Tạo vị trí mới
         /// </summary>
         [HttpPost]
-        [HasPermission(PermissionConstants.LOCATION_CREATE)]
         public async Task<IActionResult> CreateLocation([FromBody] CreateLocationDto dto)
         {
+            if (!User.IsInRole("Owner") && !User.HasClaim("permission", PermissionConstants.LOCATION_CREATE)
+                && !User.HasClaim("permission", PermissionConstants.PRODUCT_CATEGORY_MANAGE))
+                return StatusCode(403, new ApiResponse<object> { Success = false, Message = "Bạn không có quyền thêm vị trí kho." });
             try
             {
                 var currentUserId = GetCurrentUserId();
@@ -134,22 +143,25 @@ namespace MEP_Management_System.Controllers.InventoryController
                     });
                 }
 
+                var branchId = GetCurrentBranchId();
+
                 // Check duplicate name
                 var existing = await _context.ProductLocations
-                    .FirstOrDefaultAsync(l => l.LocationName.ToLower() == dto.LocationName.Trim().ToLower());
+                    .FirstOrDefaultAsync(l => l.LocationName.ToLower() == dto.LocationName.Trim().ToLower() && l.BranchId == branchId);
 
                 if (existing != null)
                 {
                     return BadRequest(new ApiResponse<object>
                     {
                         Success = false,
-                        Message = "Tên vị trí đã tồn tại."
+                        Message = "Tên vị trí đã tồn tại trong chi nhánh này."
                     });
                 }
 
                 var location = new ProductLocation
                 {
                     LocationId = Guid.NewGuid(),
+                    BranchId = branchId,
                     LocationName = dto.LocationName.Trim(),
                     LocationCode = dto.LocationCode?.Trim(),
                     Description = dto.Description?.Trim(),
@@ -183,9 +195,11 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// PUT /api/locations/{id} - Cập nhật vị trí
         /// </summary>
         [HttpPut("{id:guid}")]
-        [HasPermission(PermissionConstants.LOCATION_UPDATE)]
         public async Task<IActionResult> UpdateLocation(Guid id, [FromBody] UpdateLocationDto dto)
         {
+            if (!User.IsInRole("Owner") && !User.HasClaim("permission", PermissionConstants.LOCATION_UPDATE)
+                && !User.HasClaim("permission", PermissionConstants.PRODUCT_CATEGORY_MANAGE))
+                return StatusCode(403, new ApiResponse<object> { Success = false, Message = "Bạn không có quyền sửa vị trí kho." });
             try
             {
                 var currentUserId = GetCurrentUserId();
@@ -198,13 +212,15 @@ namespace MEP_Management_System.Controllers.InventoryController
                     });
                 }
 
+                var branchId = GetCurrentBranchId();
+
                 var location = await _context.ProductLocations.FindAsync(id);
-                if (location == null)
+                if (location == null || (location.BranchId != null && location.BranchId != branchId))
                 {
                     return NotFound(new ApiResponse<object>
                     {
                         Success = false,
-                        Message = "Không tìm thấy vị trí."
+                        Message = "Không tìm thấy vị trí hoặc bạn không có quyền sửa vị trí này."
                     });
                 }
 
@@ -212,14 +228,14 @@ namespace MEP_Management_System.Controllers.InventoryController
                 if (!string.IsNullOrWhiteSpace(dto.LocationName))
                 {
                     var existing = await _context.ProductLocations
-                        .FirstOrDefaultAsync(l => l.LocationName.ToLower() == dto.LocationName.Trim().ToLower() && l.LocationId != id);
+                        .FirstOrDefaultAsync(l => l.LocationName.ToLower() == dto.LocationName.Trim().ToLower() && l.LocationId != id && l.BranchId == branchId);
 
                     if (existing != null)
                     {
                         return BadRequest(new ApiResponse<object>
                         {
                             Success = false,
-                            Message = "Tên vị trí đã tồn tại."
+                            Message = "Tên vị trí đã tồn tại trong chi nhánh này."
                         });
                     }
 
@@ -268,18 +284,22 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// DELETE /api/locations/{id} - Xóa vị trí
         /// </summary>
         [HttpDelete("{id:guid}")]
-        [HasPermission(PermissionConstants.LOCATION_DELETE)]
         public async Task<IActionResult> DeleteLocation(Guid id)
         {
+            if (!User.IsInRole("Owner") && !User.HasClaim("permission", PermissionConstants.LOCATION_DELETE)
+                && !User.HasClaim("permission", PermissionConstants.PRODUCT_CATEGORY_MANAGE))
+                return StatusCode(403, new ApiResponse<object> { Success = false, Message = "Bạn không có quyền xóa vị trí kho." });
             try
             {
+                var branchId = GetCurrentBranchId();
+
                 var location = await _context.ProductLocations.FindAsync(id);
-                if (location == null)
+                if (location == null || (location.BranchId != null && location.BranchId != branchId))
                 {
                     return NotFound(new ApiResponse<object>
                     {
                         Success = false,
-                        Message = "Không tìm thấy vị trí."
+                        Message = "Không tìm thấy vị trí hoặc bạn không có quyền xóa."
                     });
                 }
 

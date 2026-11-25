@@ -31,7 +31,7 @@ builder.Services.AddAutoMapper(AppDomain.CurrentDomain.GetAssemblies());
 
 // Services
 builder.Services.AddSingleton<JwtHelper>();
-builder.Services.AddScoped<INotificationSender, LogNotificationSender>();
+builder.Services.AddScoped<INotificationSender, SignalRNotificationSender>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentBranchAccessor, CurrentBranchAccessor>();
 builder.Services.AddScoped<IOrderDiscountService, OrderDiscountService>();
@@ -40,12 +40,14 @@ builder.Services.AddScoped<ReportService>();
 //builder.Services.AddScoped<IProductService, ProductService>(); // Removed: using static ProductService methods directly
 //builder.Services.AddScoped<IInvoiceService, InvoiceService>(); // Removed: InvoiceService is now static
 builder.Services.AddScoped<ISupplierDebtService, SupplierDebtService>();
+builder.Services.AddScoped<InventoryLedgerService>();
 builder.Services.AddScoped<CustomerDebtService>();
 builder.Services.AddScoped<InwardInventoryQueryService>();
 builder.Services.AddScoped<StockPrintTemplateService>();
 builder.Services.AddScoped<InvoicePrintTemplateService>();
 //builder.Services.AddScoped<MEP_Management_System.Services.Chatbot.ToolDispatcher>(); // Removed: ToolDispatcher not found
 builder.Services.AddScoped<MEP_Management_System.Services.Chatbot.SqlExecutor>();
+builder.Services.AddSingleton<MEP_Management_System.Services.Chatbot.ChatbotRateLimiter>();
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));
 builder.Services.AddTransient<IEmailService, EmailService>();
 
@@ -162,9 +164,10 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        var origins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>()
-            ?? new[] { "http://localhost:3000", "https://mep-retail-management-system.vercel.app" };
-        policy.WithOrigins(origins)
+        policy.WithOrigins(
+                "http://localhost:3000",
+                "https://mep-retail-management-system.vercel.app"
+            )
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();

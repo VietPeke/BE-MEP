@@ -55,22 +55,111 @@ namespace MEP_Management_System.Controllers.InventoryController
         }
 
         /// <summary>
-        /// 1. GET /api/products - List all products with pagination, filtering, and sorting
+        /// 0. GET /api/products/lookup - Lightweight product list for dropdowns/selectboxes.
+        /// Khong yeu cau quyen cu the, chi can da dang nhap.
         /// </summary>
-        [HttpGet]
-        [HasPermission(PermissionConstants.PRODUCT_VIEW)]
-        public async Task<IActionResult> GetProducts([FromQuery] DTOs.InventoryDTOs.ProductParameters @params)
+        [HttpGet("lookup")]
+        public async Task<IActionResult> GetProductsLookup(
+            [FromQuery] int pageNumber = 1,
+            [FromQuery] int pageSize = 200,
+            [FromQuery] string? searchTerm = null)
         {
             try
             {
                 var branchId = GetCurrentBranchId();
                 if (branchId == null)
-                {
-                    return BadRequest(new ApiResponse<object>
+                    return Ok(new ApiResponse<object>
                     {
-                        Success = false,
-                        Message = "Không tìm thấy chi nhánh hợp lệ.",
-                        Errors = new() { "No valid branch found." }
+                        Success = true,
+                        Message = "Chưa được gán chi nhánh.",
+                        Data = new { items = new List<object>() }
+                    });
+
+                pageSize = Math.Clamp(pageSize, 1, 500);
+
+                var query = _context.BranchProducts
+                    .Include(bp => bp.Product)
+                    .Where(bp => bp.BranchId == branchId
+                        && bp.IsActive == 1
+                        && bp.Product.Status == 1)
+                    .AsQueryable();
+
+                if (!string.IsNullOrWhiteSpace(searchTerm))
+                {
+                    var term = searchTerm.Trim().ToLower();
+                    query = query.Where(bp =>
+                        bp.Product.ProductCode.ToLower().Contains(term) ||
+                        bp.Product.ProductName.ToLower().Contains(term));
+                }
+
+                var items = await query
+                    .OrderBy(bp => bp.Product.ProductName)
+                    .Skip((pageNumber - 1) * pageSize)
+                    .Take(pageSize)
+                    .Select(bp => new
+                    {
+                        branchProductId = bp.BranchProductId,
+                        productId = bp.Product.ProductId,
+                        productCode = bp.Product.ProductCode,
+                        productName = bp.Product.ProductName,
+                        unitName = bp.Product.BaseUnit,
+                        costPrice = bp.CostPrice,
+                        actualStock = bp.ActualStock,
+                        availableStock = bp.AvailableStock
+                    })
+                    .ToListAsync();
+
+                return Ok(new ApiResponse<object>
+                {
+                    Success = true,
+                    Message = "Danh sach san pham.",
+                    Data = new { items }
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new ApiResponse<object>
+                {
+                    Success = false,
+                    Message = "Loi khi lay danh sach san pham.",
+                    Errors = new() { ex.Message }
+                });
+            }
+        }
+
+        /// <summary>
+        /// 1. GET /api/products - List all products with pagination, filtering, and sorting
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetProducts([FromQuery] DTOs.InventoryDTOs.ProductParameters @params)
+        {
+            try
+            {
+                // Quyen xem: bat ky quyen PRODUCT nao
+                if (!User.IsInRole("Owner") && !User.HasClaim("permission", PermissionConstants.PRODUCT_VIEW)
+                    && !User.HasClaim("permission", PermissionConstants.PRODUCT_CREATE)
+                    && !User.HasClaim("permission", PermissionConstants.PRODUCT_UPDATE)
+                    && !User.HasClaim("permission", PermissionConstants.PRODUCT_DELETE)
+                    && !User.HasClaim("permission", PermissionConstants.PRODUCT_CATEGORY_MANAGE))
+                    return StatusCode(403, new ApiResponse<object> { Success = false, Message = "Bạn không có quyền xem danh sách sản phẩm." });
+
+                var branchId = GetCurrentBranchId();
+                if (branchId == null)
+                {
+                    return Ok(new ApiResponse<PaginatedResponse<ProductUpsertDto>>
+                    {
+                        Success = true,
+                        Message = "Chưa được gán chi nhánh.",
+                        Data = new PaginatedResponse<ProductUpsertDto>
+                        {
+                            Items = new List<ProductUpsertDto>(),
+                            TotalCount = 0,
+                            PageNumber = @params.PageNumber,
+                            PageSize = @params.PageSize,
+                            TotalPages = 1,
+                            HasNextPage = false,
+                            HasPreviousPage = false
+                        }
                     });
                 }
 
@@ -94,8 +183,10 @@ namespace MEP_Management_System.Controllers.InventoryController
                     .Include(bp => bp.Product).ThenInclude(p => p.UpdatedByUser)
                     .Where(bp => bp.BranchId == branchId).AsQueryable();
 
-                // Exclude soft-deleted products
-                query = query.Where(bp => bp.IsActive != -1);
+                // Exclude soft-deleted products and enforce SaaS tenant isolation
+                query = query.Where(bp => bp.IsActive != -1 && 
+                                          (bp.Product.Status == null || bp.Product.Status != -1) &&
+                                          (bp.Product.BranchId == null || bp.Product.BranchId == branchId));
 
 
                 // Search by product name, code, or barcode
@@ -184,7 +275,7 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// 1a. GET /api/products/search - Autocomplete tìm sản phẩm (dùng trong form nhập hàng).
         /// </summary>
         [HttpGet("search")]
-        [HasPermission(PermissionConstants.PRODUCT_VIEW)]
+        // Lookup API - cho phep moi authenticated user tim kiem SP cho dropdown
         public async Task<IActionResult> SearchProducts([FromQuery] string term, [FromQuery] int limit = 10)
         {
             try
@@ -193,21 +284,46 @@ namespace MEP_Management_System.Controllers.InventoryController
                 var branchId = GetCurrentBranchId();
                 if (branchId == null)
                 {
-                    return BadRequest(new ApiResponse<object>
+                    return Ok(new ApiResponse<object>
                     {
-                        Success = false,
-                        Message = "Không tìm thấy chi nhánh hợp lệ.",
-                        Errors = new() { "No valid branch found." }
+                        Success = true,
+                        Message = "Chưa được gán chi nhánh.",
+                        Data = new { items = new List<ProductSearchResultDto>() }
                     });
                 }
 
                 if (string.IsNullOrWhiteSpace(term))
                 {
+                    // Tra ve danh sach san pham gan day nhat khi khong co search term
+                    var fallbackResults = await _context.BranchProducts
+                        .Include(bp => bp.Product).ThenInclude(p => p.MediaResources)
+                        .Where(bp => bp.BranchId == branchId
+                            && bp.IsActive == 1
+                            && bp.Product.Status == 1)
+                        .OrderByDescending(bp => bp.Product.CreatedAt)
+                        .Take(Math.Clamp(limit, 1, 50))
+                        .Select(bp => new ProductSearchResultDto
+                        {
+                            ProductId = bp.Product.ProductId,
+                            BranchProductId = bp.BranchProductId,
+                            ProductCode = bp.Product.ProductCode,
+                            ProductName = bp.Product.ProductName,
+                            BrandName = bp.Product.BrandName,
+                            CategoryName = bp.Product.CategoryName,
+                            Barcode = bp.Product.Barcode,
+                            Unit = bp.Product.BaseUnit,
+                            ImageUrl = bp.Product.MediaResources
+                                .Where(m => m.IsPrimary == 1)
+                                .Select(m => m.MediaUrl)
+                                .FirstOrDefault()
+                        })
+                        .ToListAsync();
+
                     return Ok(new ApiResponse<object>
                     {
                         Success = true,
-                        Message = "Empty term",
-                        Data = new { items = new List<ProductSearchResultDto>() }
+                        Message = "Danh sach san pham.",
+                        Data = new { items = fallbackResults }
                     });
                 }
 
@@ -270,7 +386,7 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// 1b. GET /api/products/suggest-new-product - Gợi ý thông tin sản phẩm mới inline
         /// </summary>
         [HttpGet("suggest-new-product")]
-        [HasPermission(PermissionConstants.PRODUCT_VIEW)]
+        // Lookup API - reference data cho forms
         public async Task<IActionResult> SuggestNewProduct([FromQuery] string term)
         {
             try
@@ -370,11 +486,17 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// 2. GET /api/products/{id} - Get product details by ID
         /// </summary>
         [HttpGet("{id:guid}")]
-        [HasPermission(PermissionConstants.PRODUCT_VIEW)]
         public async Task<IActionResult> GetProductById(Guid id)
         {
             try
             {
+                if (!User.IsInRole("Owner") && !User.HasClaim("permission", PermissionConstants.PRODUCT_VIEW)
+                    && !User.HasClaim("permission", PermissionConstants.PRODUCT_CREATE)
+                    && !User.HasClaim("permission", PermissionConstants.PRODUCT_UPDATE)
+                    && !User.HasClaim("permission", PermissionConstants.PRODUCT_DELETE)
+                    && !User.HasClaim("permission", PermissionConstants.PRODUCT_CATEGORY_MANAGE))
+                    return StatusCode(403, new ApiResponse<object> { Success = false, Message = "Bạn không có quyền xem chi tiết sản phẩm." });
+
                 var dto = await ProductService.GetProductByIdAsync(id, User, _context, _currentBranch, _mapper);
                 if (dto == null)
                 {
@@ -419,8 +541,8 @@ namespace MEP_Management_System.Controllers.InventoryController
                 if (string.IsNullOrWhiteSpace(dto.ProductCode)) errors.Add("productCode is required");
                 if (string.IsNullOrWhiteSpace(dto.ProductName)) errors.Add("productName is required");
                 if (string.IsNullOrWhiteSpace(dto.Unit)) errors.Add("unit is required");
-                if (dto.CostPrice < 0) errors.Add("costPrice không được âm");
-                if (dto.SalePrice < 0) errors.Add("salePrice không được âm");
+                if (dto.CostPrice <= 0) errors.Add("costPrice phải lớn hơn 0");
+                if (dto.SalePrice <= 0) errors.Add("salePrice phải lớn hơn 0");
 
                 if (errors.Any())
                 {
@@ -429,7 +551,10 @@ namespace MEP_Management_System.Controllers.InventoryController
 
                 // Check product code uniqueness WITHIN CURRENT BRANCH only
                 bool isCodeExist = await _context.BranchProducts
-                    .AnyAsync(bp => bp.BranchId == branchId.Value && bp.Product.ProductCode.ToLower() == dto.ProductCode.Trim().ToLower());
+                    .AnyAsync(bp => bp.BranchId == branchId.Value && 
+                                    bp.IsActive != -1 && 
+                                    bp.Product.Status != -1 &&
+                                    bp.Product.ProductCode.ToLower() == dto.ProductCode.Trim().ToLower());
                 if (isCodeExist)
                 {
                     return BadRequest(new ApiResponse<object> { Success = false, Message = "Mã sản phẩm đã tồn tại trong chi nhánh này", Errors = new() { $"Code '{dto.ProductCode}' exists" } });
@@ -446,6 +571,7 @@ namespace MEP_Management_System.Controllers.InventoryController
                     product.ProductId = Guid.NewGuid();
                     product.CreatedAt = currentLocalTime;
                     product.CreatedBy = currentUserId;
+                    product.BranchId = branchId;
 
                     product.ProductConversionUnits = new List<ProductConversionUnit>();
                     product.BranchProducts = new List<BranchProduct>();
@@ -533,6 +659,7 @@ namespace MEP_Management_System.Controllers.InventoryController
                         CostPrice = dto.CostPrice,
                         SellPrice = dto.SalePrice,
                         DirectSale = (short?)(dto.DirectSale ? 1 : 0),
+                        IsActive = 0,
                         Product = null!
                     };
                     _context.BranchProducts.Add(branchProduct);
@@ -669,6 +796,7 @@ namespace MEP_Management_System.Controllers.InventoryController
                         product.ProductId = Guid.NewGuid();
                         product.CreatedAt = currentLocalTime;
                         product.CreatedBy = currentUserId;
+                        product.BranchId = branchId;
 
                         product.ProductConversionUnits = new List<ProductConversionUnit>();
                         product.BranchProducts = new List<BranchProduct>();
@@ -705,6 +833,7 @@ namespace MEP_Management_System.Controllers.InventoryController
                             CostPrice = pDto.CostPrice,
                             SellPrice = pDto.SalePrice,
                             DirectSale = (short?)(pDto.DirectSale ? 1 : 0),
+                            IsActive = 0,
                             Product = null!
                         };
                         _context.BranchProducts.Add(branchProduct);
@@ -738,7 +867,6 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// 4. PUT /api/products/{id} - Update product
         /// </summary>
         [HttpPut("{id:guid}")]
-        [HasPermission(PermissionConstants.PRODUCT_UPDATE)]
         public async Task<IActionResult> UpdateProduct(Guid id, [FromBody] UpdateProductDto dto)
         {
             try
@@ -761,22 +889,44 @@ namespace MEP_Management_System.Controllers.InventoryController
                     });
                 }
 
+                // Quyen sua: PRODUCT_UPDATE hoac nguoi tao san pham (trong phien hien tai)
+                var uid = GetCurrentUserId();
+                bool isCreator = bp.Product.CreatedBy.HasValue && bp.Product.CreatedBy.Value == uid;
+                // Chi cho phep nguoi tao sua neu san pham duoc tao trong phien dang nhap nay
+                if (isCreator)
+                {
+                    var iatClaim = User.FindFirst("iat")?.Value;
+                    if (iatClaim != null && long.TryParse(iatClaim, out var iat))
+                    {
+                        var sessionStart = DateTimeOffset.FromUnixTimeSeconds(iat).UtcDateTime;
+                        if (bp.Product.CreatedAt.HasValue && bp.Product.CreatedAt.Value < sessionStart)
+                            isCreator = false; // San pham tao truoc phien nay -> ko cho sua
+                    }
+                }
+                if (!User.IsInRole("Owner") && !User.HasClaim("permission", PermissionConstants.PRODUCT_UPDATE) && !isCreator)
+                    return StatusCode(403, new ApiResponse<object> { Success = false, Message = "Bạn không có quyền chỉnh sửa sản phẩm này." });
+
                 var errors = new List<string>();
                 if (string.IsNullOrWhiteSpace(dto.ProductCode)) errors.Add("productCode is required");
                 if (string.IsNullOrWhiteSpace(dto.ProductName)) errors.Add("productName is required");
                 if (string.IsNullOrWhiteSpace(dto.Unit)) errors.Add("unit is required");
-                if (dto.CostPrice < 0) errors.Add("costPrice không được âm");
-                if (dto.SalePrice < 0) errors.Add("salePrice không được âm");
+                if (dto.CostPrice <= 0) errors.Add("costPrice phải lớn hơn 0");
+                if (dto.SalePrice <= 0) errors.Add("salePrice phải lớn hơn 0");
 
                 if (errors.Any())
                 {
                     return BadRequest(new ApiResponse<object> { Success = false, Message = "Validation failed", Errors = errors });
                 }
 
-                bool isCodeExist = await _context.Products.AnyAsync(p => p.ProductId != id && p.ProductCode.ToLower() == dto.ProductCode.Trim().ToLower());
+                bool isCodeExist = await _context.BranchProducts
+                    .AnyAsync(otherBp => otherBp.BranchId == branchId.Value && 
+                                         otherBp.ProductId != id &&
+                                         otherBp.IsActive != -1 &&
+                                         otherBp.Product.Status != -1 &&
+                                         otherBp.Product.ProductCode.ToLower() == dto.ProductCode.Trim().ToLower());
                 if (isCodeExist)
                 {
-                    return BadRequest(new ApiResponse<object> { Success = false, Message = "Product code already exists", Errors = new() { $"Code '{dto.ProductCode}' exists" } });
+                    return BadRequest(new ApiResponse<object> { Success = false, Message = "Product code already exists in this branch", Errors = new() { $"Code '{dto.ProductCode}' exists" } });
                 }
 
                 // UOM: Không cho sửa BaseUnit khi sản phẩm đã có giao dịch
@@ -818,6 +968,7 @@ namespace MEP_Management_System.Controllers.InventoryController
                     bp.Product.Height = dto.Height;
                     bp.Product.SizeUnit = dto.SizeUnit;
                     bp.Product.ProductCode = dto.ProductCode;
+                    bp.Product.BaseUnit = dto.Unit;
                     bp.Product.UpdatedAt = currentLocalTime;
                     bp.Product.UpdatedBy = currentUserId;
 
@@ -933,7 +1084,6 @@ namespace MEP_Management_System.Controllers.InventoryController
 
 
         [HttpDelete("{id:guid}")]
-        [HasPermission(PermissionConstants.PRODUCT_DELETE)]
         public async Task<IActionResult> DeleteProduct(Guid id)
         {
             try
@@ -954,14 +1104,56 @@ namespace MEP_Management_System.Controllers.InventoryController
                     });
                 }
 
-                bp.IsActive = -1;
-                if (bp.Product != null)
+                // Quyen xoa: PRODUCT_DELETE hoac nguoi tao san pham (trong phien hien tai)
+                var uid = GetCurrentUserId();
+                bool isCreator = bp.Product.CreatedBy.HasValue && bp.Product.CreatedBy.Value == uid;
+                if (isCreator)
                 {
-                    bp.Product.Status = -1;
-                    _context.Products.Update(bp.Product);
+                    var iatClaim = User.FindFirst("iat")?.Value;
+                    if (iatClaim != null && long.TryParse(iatClaim, out var iat))
+                    {
+                        var sessionStart = DateTimeOffset.FromUnixTimeSeconds(iat).UtcDateTime;
+                        if (bp.Product.CreatedAt.HasValue && bp.Product.CreatedAt.Value < sessionStart)
+                            isCreator = false;
+                    }
+                }
+                if (!User.IsInRole("Owner") && !User.HasClaim("permission", PermissionConstants.PRODUCT_DELETE) && !isCreator)
+                    return StatusCode(403, new ApiResponse<object> { Success = false, Message = "Bạn không có quyền xóa sản phẩm này." });
+
+                var hasDependencies = await _context.OrderItems.AnyAsync(oi => oi.BranchProductId == bp.BranchProductId) ||
+                                      await _context.ReturnItems.AnyAsync(ri => ri.BranchProductId == bp.BranchProductId) ||
+                                      await _context.StockTicketItems.AnyAsync(sti => sti.BranchProductId == bp.BranchProductId);
+
+                if (hasDependencies)
+                {
+                    bp.IsActive = -1;
+                    if (bp.Product != null)
+                    {
+                        bp.Product.Status = -1;
+                        if (!string.IsNullOrEmpty(bp.Product.ProductCode))
+                        {
+                            var shortId = bp.Product.ProductId.ToString().Substring(0, 6);
+                            var newCode = $"d_{shortId}_{bp.Product.ProductCode}";
+                            if (newCode.Length > 50) newCode = newCode.Substring(0, 50);
+                            bp.Product.ProductCode = newCode;
+                        }
+                        _context.Products.Update(bp.Product);
+                    }
+                    _context.BranchProducts.Update(bp);
+                }
+                else
+                {
+                    _context.BranchProducts.Remove(bp);
+                    if (bp.Product != null)
+                    {
+                        var hasOtherBranches = await _context.BranchProducts.AnyAsync(otherBp => otherBp.ProductId == bp.ProductId && otherBp.BranchProductId != bp.BranchProductId);
+                        if (!hasOtherBranches)
+                        {
+                            _context.Products.Remove(bp.Product);
+                        }
+                    }
                 }
 
-                _context.BranchProducts.Update(bp);
                 await _context.SaveChangesAsync();
 
                 return Ok(new ApiResponse<object>
@@ -1008,6 +1200,7 @@ namespace MEP_Management_System.Controllers.InventoryController
 
                 short statusVal = isActive ? (short)1 : (short)0;
                 bp.IsActive = statusVal;
+                bp.DirectSale = statusVal;
 
                 if (bp.Product != null)
                 {
@@ -1088,6 +1281,7 @@ namespace MEP_Management_System.Controllers.InventoryController
                 {
                     short statusVal = request.IsActive ? (short)1 : (short)0;
                     bp.IsActive = statusVal;
+                    bp.DirectSale = statusVal;
 
                     if (bp.Product != null)
                     {
@@ -1256,7 +1450,7 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// GET /api/products/categories - Danh sách nhóm hàng (distinct) kèm số SP đang dùng
         /// </summary>
         [HttpGet("categories")]
-        [HasPermission(PermissionConstants.PRODUCT_VIEW)]
+        // Lookup API - reference data cho forms
         public async Task<IActionResult> GetCategories()
         {
             try
@@ -1264,10 +1458,11 @@ namespace MEP_Management_System.Controllers.InventoryController
                 var branchId = GetCurrentBranchId();
                 if (branchId == null)
                 {
-                    return BadRequest(new ApiResponse<object>
+                    return Ok(new ApiResponse<List<TaxonomyItemDto>>
                     {
-                        Success = false,
-                        Message = "Không tìm thấy chi nhánh hợp lệ."
+                        Success = true,
+                        Message = "Chưa được gán chi nhánh.",
+                        Data = new List<TaxonomyItemDto>()
                     });
                 }
 
@@ -1319,7 +1514,7 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// GET /api/products/brands - Danh sách thương hiệu (distinct) kèm số SP đang dùng
         /// </summary>
         [HttpGet("brands")]
-        [HasPermission(PermissionConstants.PRODUCT_VIEW)]
+        // Lookup API - reference data cho forms
         public async Task<IActionResult> GetBrands()
         {
             try
@@ -1327,10 +1522,11 @@ namespace MEP_Management_System.Controllers.InventoryController
                 var branchId = GetCurrentBranchId();
                 if (branchId == null)
                 {
-                    return BadRequest(new ApiResponse<object>
+                    return Ok(new ApiResponse<List<TaxonomyItemDto>>
                     {
-                        Success = false,
-                        Message = "Không tìm thấy chi nhánh hợp lệ."
+                        Success = true,
+                        Message = "Chưa được gán chi nhánh.",
+                        Data = new List<TaxonomyItemDto>()
                     });
                 }
 
@@ -1382,7 +1578,7 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// POST /api/products/categories - Thêm mới nhóm hàng (category)
         /// </summary>
         [HttpPost("categories")]
-        [HasPermission(PermissionConstants.PRODUCT_CREATE)]
+        [HasPermission(PermissionConstants.PRODUCT_CATEGORY_MANAGE)]
         public async Task<IActionResult> CreateCategory([FromBody] CreateTaxonomyDto dto)
         {
             try
@@ -1425,9 +1621,11 @@ namespace MEP_Management_System.Controllers.InventoryController
 
                 var tax = new ProductTaxonomy
                 {
+                    TaxonomyId = Guid.NewGuid(),
                     BranchId = branchId,
                     Name = trimmedName,
-                    Type = "Category"
+                    Type = "Category",
+                    CreatedAt = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified)
                 };
                 _context.ProductTaxonomies.Add(tax);
                 await _context.SaveChangesAsync();
@@ -1445,7 +1643,7 @@ namespace MEP_Management_System.Controllers.InventoryController
                 {
                     Success = false,
                     Message = "Lỗi khi thêm nhóm hàng",
-                    Errors = new() { ex.Message }
+                    Errors = new() { ex.Message, ex.InnerException?.Message ?? "No inner exception" }
                 });
             }
         }
@@ -1454,7 +1652,7 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// POST /api/products/brands - Thêm mới thương hiệu (brand)
         /// </summary>
         [HttpPost("brands")]
-        [HasPermission(PermissionConstants.PRODUCT_CREATE)]
+        [HasPermission(PermissionConstants.PRODUCT_CATEGORY_MANAGE)]
         public async Task<IActionResult> CreateBrand([FromBody] CreateTaxonomyDto dto)
         {
             try
@@ -1497,9 +1695,11 @@ namespace MEP_Management_System.Controllers.InventoryController
 
                 var tax = new ProductTaxonomy
                 {
+                    TaxonomyId = Guid.NewGuid(),
                     BranchId = branchId,
                     Name = trimmedName,
-                    Type = "Brand"
+                    Type = "Brand",
+                    CreatedAt = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified)
                 };
                 _context.ProductTaxonomies.Add(tax);
                 await _context.SaveChangesAsync();
@@ -1517,7 +1717,7 @@ namespace MEP_Management_System.Controllers.InventoryController
                 {
                     Success = false,
                     Message = "Lỗi khi thêm thương hiệu",
-                    Errors = new() { ex.Message }
+                    Errors = new() { ex.Message, ex.InnerException?.Message ?? "No inner exception" }
                 });
             }
         }
@@ -1526,7 +1726,7 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// PUT /api/products/categories/rename - Đổi tên nhóm hàng (bulk update mọi SP đang dùng tên cũ)
         /// </summary>
         [HttpPut("categories/rename")]
-        [HasPermission(PermissionConstants.PRODUCT_UPDATE)]
+        [HasPermission(PermissionConstants.PRODUCT_CATEGORY_MANAGE)]
         public async Task<IActionResult> RenameCategory([FromBody] RenameTaxonomyDto dto)
         {
             try
@@ -1612,7 +1812,7 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// PUT /api/products/brands/rename - Đổi tên thương hiệu (bulk update mọi SP đang dùng tên cũ)
         /// </summary>
         [HttpPut("brands/rename")]
-        [HasPermission(PermissionConstants.PRODUCT_UPDATE)]
+        [HasPermission(PermissionConstants.PRODUCT_CATEGORY_MANAGE)]
         public async Task<IActionResult> RenameBrand([FromBody] RenameTaxonomyDto dto)
         {
             try
@@ -1698,7 +1898,7 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// DELETE /api/products/categories/{name} - Gỡ nhóm hàng khỏi tất cả SP đang dùng (set về null)
         /// </summary>
         [HttpDelete("categories/{name}")]
-        [HasPermission(PermissionConstants.PRODUCT_UPDATE)]
+        [HasPermission(PermissionConstants.PRODUCT_CATEGORY_MANAGE)]
         public async Task<IActionResult> DeleteCategory(string name)
         {
             try
@@ -1773,7 +1973,7 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// DELETE /api/products/brands/{name} - Gỡ thương hiệu khỏi tất cả SP đang dùng (set về null)
         /// </summary>
         [HttpDelete("brands/{name}")]
-        [HasPermission(PermissionConstants.PRODUCT_UPDATE)]
+        [HasPermission(PermissionConstants.PRODUCT_CATEGORY_MANAGE)]
         public async Task<IActionResult> DeleteBrand(string name)
         {
             try
@@ -1850,7 +2050,7 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// GET /api/products/locations - Danh sách vị trí kho (distinct)
         /// </summary>
         [HttpGet("locations")]
-        [HasPermission(PermissionConstants.PRODUCT_VIEW)]
+        // Lookup API - reference data cho forms
         public async Task<IActionResult> GetLocations()
         {
             try
@@ -1893,9 +2093,11 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// POST /api/products/locations - Thêm mới vị trí kho
         /// </summary>
         [HttpPost("locations")]
-        [HasPermission(PermissionConstants.PRODUCT_CREATE)]
         public async Task<IActionResult> CreateLocation([FromBody] CreateTaxonomyDto dto)
         {
+            if (!User.IsInRole("Owner") && !User.HasClaim("permission", PermissionConstants.PRODUCT_CREATE)
+                && !User.HasClaim("permission", PermissionConstants.PRODUCT_CATEGORY_MANAGE))
+                return StatusCode(403, new ApiResponse<object> { Success = false, Message = "Bạn không có quyền thêm vị trí kho." });
             try
             {
                 var branchId = GetCurrentBranchId();
@@ -1952,9 +2154,12 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// PUT /api/products/locations - Đổi tên vị trí kho (bulk update)
         /// </summary>
         [HttpPut("locations")]
-        [HasPermission(PermissionConstants.PRODUCT_UPDATE)]
         public async Task<IActionResult> RenameLocation([FromBody] RenameTaxonomyDto dto)
         {
+            if (!User.IsInRole("Owner") && !User.HasClaim("permission", PermissionConstants.PRODUCT_UPDATE)
+                && !User.HasClaim("permission", PermissionConstants.PRODUCT_CATEGORY_MANAGE))
+                return StatusCode(403, new ApiResponse<object> { Success = false, Message = "Bạn không có quyền quản lý vị trí kho." });
+
             var branchId = GetCurrentBranchId();
             if (branchId == null)
             {
@@ -2038,9 +2243,11 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// DELETE /api/products/locations/{locationName} - Xóa vị trí kho
         /// </summary>
         [HttpDelete("locations/{locationName}")]
-        [HasPermission(PermissionConstants.PRODUCT_DELETE)]
         public async Task<IActionResult> DeleteLocation(string locationName)
         {
+            if (!User.IsInRole("Owner") && !User.HasClaim("permission", PermissionConstants.PRODUCT_DELETE)
+                && !User.HasClaim("permission", PermissionConstants.PRODUCT_CATEGORY_MANAGE))
+                return StatusCode(403, new ApiResponse<object> { Success = false, Message = "Bạn không có quyền xóa vị trí kho." });
             try
             {
                 if (string.IsNullOrWhiteSpace(locationName))
@@ -2102,13 +2309,15 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// GET /api/products/attribute-types - Danh sách loại thuộc tính
         /// </summary>
         [HttpGet("attribute-types")]
-        [HasPermission(PermissionConstants.PRODUCT_VIEW)]
+        // Lookup API - reference data cho forms
         public async Task<IActionResult> GetAttributeTypes()
         {
             try
             {
+                var branchId = GetCurrentBranchId();
+
                 var result = await _context.ProductAttributeTypes
-                    .Where(t => t.IsActive == 1)
+                    .Where(t => t.IsActive == 1 && t.BranchId == branchId)
                     .OrderBy(t => t.TypeName)
                     .Select(t => new
                     {
@@ -2139,9 +2348,11 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// POST /api/products/attribute-types - Thêm mới loại thuộc tính
         /// </summary>
         [HttpPost("attribute-types")]
-        [HasPermission(PermissionConstants.PRODUCT_CREATE)]
         public async Task<IActionResult> CreateAttributeType([FromBody] CreateAttributeTypeDto dto)
         {
+            if (!User.IsInRole("Owner") && !User.HasClaim("permission", PermissionConstants.PRODUCT_CREATE)
+                && !User.HasClaim("permission", PermissionConstants.PRODUCT_CATEGORY_MANAGE))
+                return StatusCode(403, new ApiResponse<object> { Success = false, Message = "Bạn không có quyền thêm thuộc tính." });
             try
             {
                 if (string.IsNullOrWhiteSpace(dto.TypeName))
@@ -2153,8 +2364,10 @@ namespace MEP_Management_System.Controllers.InventoryController
                     });
                 }
 
+                var branchId = GetCurrentBranchId();
+
                 var exists = await _context.ProductAttributeTypes
-                    .AnyAsync(t => t.TypeName.ToLower() == dto.TypeName.Trim().ToLower() && t.IsActive == 1);
+                    .AnyAsync(t => t.TypeName.ToLower() == dto.TypeName.Trim().ToLower() && t.IsActive == 1 && t.BranchId == branchId);
 
                 if (exists)
                 {
@@ -2168,11 +2381,16 @@ namespace MEP_Management_System.Controllers.InventoryController
                 var userId = GetUserInfo();
                 var currentTime = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified);
 
+                var typeCode = !string.IsNullOrWhiteSpace(dto.TypeCode) 
+                    ? dto.TypeCode.Trim().ToUpper() 
+                    : "AT-" + Guid.NewGuid().ToString().Substring(0, 4).ToUpper();
+
                 var attributeType = new ProductAttributeType
                 {
                     TypeId = Guid.NewGuid(),
+                    BranchId = branchId,
                     TypeName = dto.TypeName.Trim(),
-                    TypeCode = !string.IsNullOrWhiteSpace(dto.TypeCode) ? dto.TypeCode.Trim().ToUpper() : null,
+                    TypeCode = typeCode,
                     IsActive = 1,
                     CreatedAt = currentTime,
                     CreatedBy = userId
@@ -2208,13 +2426,17 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// PUT /api/products/attribute-types/{id} - Cập nhật loại thuộc tính
         /// </summary>
         [HttpPut("attribute-types/{id:guid}")]
-        [HasPermission(PermissionConstants.PRODUCT_UPDATE)]
         public async Task<IActionResult> UpdateAttributeType(Guid id, [FromBody] UpdateAttributeTypeDto dto)
         {
+            if (!User.IsInRole("Owner") && !User.HasClaim("permission", PermissionConstants.PRODUCT_UPDATE)
+                && !User.HasClaim("permission", PermissionConstants.PRODUCT_CATEGORY_MANAGE))
+                return StatusCode(403, new ApiResponse<object> { Success = false, Message = "Bạn không có quyền quản lý thuộc tính." });
             try
             {
+                var branchId = GetCurrentBranchId();
+
                 var attributeType = await _context.ProductAttributeTypes.FindAsync(id);
-                if (attributeType == null || attributeType.IsActive == 0)
+                if (attributeType == null || attributeType.IsActive == 0 || (attributeType.BranchId != null && attributeType.BranchId != branchId))
                 {
                     return NotFound(new ApiResponse<object>
                     {
@@ -2226,7 +2448,7 @@ namespace MEP_Management_System.Controllers.InventoryController
                 if (!string.IsNullOrWhiteSpace(dto.TypeName))
                 {
                     var exists = await _context.ProductAttributeTypes
-                        .AnyAsync(t => t.TypeId != id && t.TypeName.ToLower() == dto.TypeName.Trim().ToLower() && t.IsActive == 1);
+                        .AnyAsync(t => t.TypeId != id && t.TypeName.ToLower() == dto.TypeName.Trim().ToLower() && t.IsActive == 1 && (t.BranchId == branchId || t.BranchId == null));
 
                     if (exists)
                     {
@@ -2277,13 +2499,17 @@ namespace MEP_Management_System.Controllers.InventoryController
         /// DELETE /api/products/attribute-types/{id} - Xóa loại thuộc tính
         /// </summary>
         [HttpDelete("attribute-types/{id:guid}")]
-        [HasPermission(PermissionConstants.PRODUCT_DELETE)]
         public async Task<IActionResult> DeleteAttributeType(Guid id)
         {
+            if (!User.IsInRole("Owner") && !User.HasClaim("permission", PermissionConstants.PRODUCT_DELETE)
+                && !User.HasClaim("permission", PermissionConstants.PRODUCT_CATEGORY_MANAGE))
+                return StatusCode(403, new ApiResponse<object> { Success = false, Message = "Bạn không có quyền xóa thuộc tính." });
             try
             {
+                var branchId = GetCurrentBranchId();
+
                 var attributeType = await _context.ProductAttributeTypes.FindAsync(id);
-                if (attributeType == null || attributeType.IsActive == 0)
+                if (attributeType == null || attributeType.IsActive == 0 || (attributeType.BranchId != null && attributeType.BranchId != branchId))
                 {
                     return NotFound(new ApiResponse<object>
                     {

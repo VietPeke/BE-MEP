@@ -106,7 +106,7 @@ public class AdminAccountsController : ControllerBase
     private async Task<bool> IsEmailTakenAsync(string email, Guid? excludeUserId = null)
     {
         var normalized = email.Trim().ToLower();
-        var query = _context.Users.Where(u => u.Email.ToLower() == normalized);
+        var query = _context.Users.Where(u => u.Email.ToLower() == normalized && u.IsActive != 0);
         if (excludeUserId.HasValue)
             query = query.Where(u => u.UserId != excludeUserId.Value);
         return await query.AnyAsync();
@@ -115,7 +115,7 @@ public class AdminAccountsController : ControllerBase
     private async Task<bool> IsUsernameTakenAsync(string username, Guid? excludeUserId = null)
     {
         var normalized = username.Trim().ToLower();
-        var query = _context.Users.Where(u => u.Username.ToLower() == normalized);
+        var query = _context.Users.Where(u => u.Username.ToLower() == normalized && u.IsActive != 0);
         if (excludeUserId.HasValue)
             query = query.Where(u => u.UserId != excludeUserId.Value);
         return await query.AnyAsync();
@@ -125,7 +125,7 @@ public class AdminAccountsController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(phone)) return false;
         var normalized = phone.Trim();
-        var query = _context.Users.Where(u => u.PhoneNumber == normalized);
+        var query = _context.Users.Where(u => u.PhoneNumber == normalized && u.IsActive != 0);
         if (excludeUserId.HasValue)
             query = query.Where(u => u.UserId != excludeUserId.Value);
         return await query.AnyAsync();
@@ -430,6 +430,8 @@ public class AdminAccountsController : ControllerBase
         _context.Users.Add(newUser);
 
         // Gán Manager cho branch nếu vừa tạo
+        // Lưu ý: KHÔNG seed global products cho branch mới — mỗi cửa hàng tự quản lý catalog riêng.
+        // Chủ cửa hàng phải tự thêm sản phẩm sau khi tạo tài khoản.
         if (branch.ManagerUserId == null)
         {
             branch.ManagerUserId = newUser.UserId;
@@ -485,7 +487,7 @@ public class AdminAccountsController : ControllerBase
             });
 
         // Validate role
-        var validRoleNames = new[] { "SalesStaff", "InventoryStaff", "Staff" };
+        var validRoleNames = new[] { "SalesStaff", "InventoryStaff" };
         if (!validRoleNames.Contains(dto.RoleName.Trim(), StringComparer.OrdinalIgnoreCase))
         {
             return BadRequest(new ErrorResponseDto
@@ -493,7 +495,7 @@ public class AdminAccountsController : ControllerBase
                 Error = new ErrorDetail
                 {
                     Code = "MSG-400",
-                    Message = "Role không hợp lệ. Chỉ chấp nhận: SalesStaff, InventoryStaff, Staff."
+                    Message = "Role không hợp lệ. Chỉ chấp nhận: SalesStaff, InventoryStaff."
                 }
             });
         }
@@ -723,7 +725,7 @@ public class AdminAccountsController : ControllerBase
     #region PUT /api/admin/accounts/{id}/roles
 
     /// <summary>
-    /// PUT /api/admin/accounts/{id}/roles - Gán roles cho user. Chặn role Admin.
+    /// PUT /api/admin/accounts/{id}/roles - Gán 1 role cho user. Chặn role Admin.
     /// </summary>
     [HttpPut("{id:guid}/roles")]
     public async Task<IActionResult> AssignRoles(Guid id, [FromBody] AdminAssignRolesRequest dto)
@@ -736,34 +738,19 @@ public class AdminAccountsController : ControllerBase
         if (user == null)
             return NotFound(new ErrorResponseDto { Error = new ErrorDetail { Code = "MSG-404", Message = "Không tìm thấy tài khoản." } });
 
-        if (dto.RoleIds == null || !dto.RoleIds.Any())
-            return BadRequest(new ErrorResponseDto { Error = new ErrorDetail { Code = "MSG-400", Message = "Phải chọn ít nhất một vai trò." } });
+        if (dto.RoleId == Guid.Empty)
+            return BadRequest(new ErrorResponseDto { Error = new ErrorDetail { Code = "MSG-400", Message = "Phải chọn một vai trò." } });
 
-        var roles = await _context.Roles.Where(r => dto.RoleIds.Contains(r.RoleId)).ToListAsync();
-
-        var existingIds = roles.Select(r => r.RoleId).ToHashSet();
-        var missing = dto.RoleIds.Where(rid => !existingIds.Contains(rid)).ToList();
-        if (missing.Any())
-        {
-            return BadRequest(new ErrorResponseDto
-            {
-                Error = new ErrorDetail { Code = "MSG-400", Message = $"Vai trò không tồn tại: {string.Join(", ", missing)}" }
-            });
-        }
+        var role = await _context.Roles.FirstOrDefaultAsync(r => r.RoleId == dto.RoleId);
+        if (role == null)
+            return BadRequest(new ErrorResponseDto { Error = new ErrorDetail { Code = "MSG-400", Message = "Vai trò không tồn tại." } });
 
         // Chặn role Admin
-        var adminRole = roles.FirstOrDefault(r => r.RoleName.Equals("Admin", StringComparison.OrdinalIgnoreCase));
-        if (adminRole != null)
-        {
-            return BadRequest(new ErrorResponseDto
-            {
-                Error = new ErrorDetail { Code = "MSG-403", Message = "Không thể gán vai trò Admin." }
-            });
-        }
+        if (role.RoleName.Equals("Admin", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new ErrorResponseDto { Error = new ErrorDetail { Code = "MSG-403", Message = "Không thể gán vai trò Admin." } });
 
         // Kiểm tra xem nếu gán quyền Owner thì chi nhánh hiện tại của user đã có Owner chưa
-        var isAssigningOwner = roles.Any(r => r.RoleName.Equals("Owner", StringComparison.OrdinalIgnoreCase));
-        if (isAssigningOwner && user.DefaultBranchId.HasValue)
+        if (role.RoleName.Equals("Owner", StringComparison.OrdinalIgnoreCase) && user.DefaultBranchId.HasValue)
         {
             var hasOwner = await _context.Users.AnyAsync(u =>
                 u.UserId != user.UserId &&
@@ -772,32 +759,17 @@ public class AdminAccountsController : ControllerBase
                 u.Roles.Any(r => r.RoleName == "Owner"));
 
             if (hasOwner)
-            {
-                return BadRequest(new ErrorResponseDto
-                {
-                    Error = new ErrorDetail { Code = "MSG-409", Message = "Chi nhánh của nhân viên này đã có Owner. Mỗi chi nhánh chỉ được phép có 1 Owner." }
-                });
-            }
+                return BadRequest(new ErrorResponseDto { Error = new ErrorDetail { Code = "MSG-409", Message = "Chi nhánh của nhân viên này đã có Owner. Mỗi chi nhánh chỉ được phép có 1 Owner." } });
         }
 
-        // Admin tự gỡ role của mình
+        // Admin tự thay đổi vai trò của mình
         if (currentAdminId == user.UserId)
-        {
-            return BadRequest(new ErrorResponseDto
-            {
-                Error = new ErrorDetail { Code = "MSG-403", Message = "Không thể tự thay đổi vai trò của chính mình." }
-            });
-        }
+            return BadRequest(new ErrorResponseDto { Error = new ErrorDetail { Code = "MSG-403", Message = "Không thể tự thay đổi vai trò của chính mình." } });
 
         user.Roles.Clear();
-        foreach (var role in roles)
-        {
-            user.Roles.Add(role);
-        }
+        user.Roles.Add(role);
 
-        var roleNames = string.Join(", ", roles.Select(r => r.RoleName));
-        await LogAction(user.UserId, "ASSIGN_ROLE", "User", $"Gán vai trò [{roleNames}] cho: {user.Email}");
-
+        await LogAction(user.UserId, "ASSIGN_ROLE", "User", $"Gán vai trò [{role.RoleName}] cho: {user.Email}");
         await _context.SaveChangesAsync();
 
         return Ok(new { message = "Cập nhật vai trò thành công." });
@@ -943,22 +915,15 @@ public class AdminAccountsController : ControllerBase
             }
         }
 
-        var existing = user.StaffAssignments.FirstOrDefault();
-        if (existing != null)
+        // Xoa tat ca StaffAssignment cu, tao moi de dam bao chi co 1 assignment active
+        _context.StaffAssignments.RemoveRange(user.StaffAssignments);
+        _context.StaffAssignments.Add(new StaffAssignment
         {
-            existing.BranchId = branch.BranchId;
-            existing.AssignedAt = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified);
-        }
-        else
-        {
-            _context.StaffAssignments.Add(new StaffAssignment
-            {
-                AssignmentId = Guid.NewGuid(),
-                UserId = user.UserId,
-                BranchId = branch.BranchId,
-                AssignedAt = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified)
-            });
-        }
+            AssignmentId = Guid.NewGuid(),
+            UserId = user.UserId,
+            BranchId = branch.BranchId,
+            AssignedAt = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified)
+        });
 
         user.DefaultBranchId = branch.BranchId;
 
@@ -1126,6 +1091,19 @@ public class AdminAccountsController : ControllerBase
         user.Status = "DELETED";
         user.IsActive = 0;
         user.DeletedAt = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified);
+
+        // Giải phóng các trường unique (Email, Username, Phone) để có thể tạo lại tài khoản
+        var shortId = user.UserId.ToString().Substring(0, 6);
+        
+        var newEmail = $"del_{shortId}_{user.Email}";
+        if (newEmail.Length > 150) newEmail = newEmail.Substring(0, 150);
+        user.Email = newEmail;
+        
+        var newUsername = $"del_{shortId}_{user.Username}";
+        if (newUsername.Length > 50) newUsername = newUsername.Substring(0, 50);
+        user.Username = newUsername;
+
+        user.PhoneNumber = null;
 
         await LogAction(user.UserId, "DELETE_USER", "User",
             $"Xóa mềm tài khoản: {user.Email} ({user.FullName})", level: "WARN");

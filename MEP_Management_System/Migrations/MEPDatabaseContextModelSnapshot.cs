@@ -312,6 +312,57 @@ namespace MEP_Management_System.Migrations
                     b.ToTable("customers", (string)null);
                 });
 
+            modelBuilder.Entity("MEP_Management_System.Models.DailyStockSnapshot", b =>
+                {
+                    b.Property<Guid>("SnapshotId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("snapshot_id")
+                        .HasDefaultValueSql("uuid_generate_v4()");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("branch_id");
+
+                    b.Property<Guid>("BranchProductId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("branch_product_id");
+
+                    b.Property<decimal>("ClosingQuantity")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)")
+                        .HasColumnName("closing_quantity");
+
+                    b.Property<decimal>("ClosingValue")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("closing_value");
+
+                    b.Property<decimal>("CostPrice")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("cost_price");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<DateOnly>("SnapshotDate")
+                        .HasColumnType("date")
+                        .HasColumnName("snapshot_date");
+
+                    b.HasKey("SnapshotId")
+                        .HasName("daily_stock_snapshots_pkey");
+
+                    b.HasIndex("SnapshotDate", "BranchId", "BranchProductId")
+                        .IsUnique()
+                        .HasDatabaseName("uk_daily_snapshot");
+
+                    b.ToTable("daily_stock_snapshots", (string)null);
+                });
+
             modelBuilder.Entity("MEP_Management_System.Models.ExpenseCategory", b =>
                 {
                     b.Property<Guid>("CategoryId")
@@ -638,6 +689,84 @@ namespace MEP_Management_System.Migrations
                     b.ToTable("inventory_check_tickets", (string)null);
                 });
 
+            modelBuilder.Entity("MEP_Management_System.Models.InventoryLedger", b =>
+                {
+                    b.Property<Guid>("LedgerId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("ledger_id")
+                        .HasDefaultValueSql("uuid_generate_v4()");
+
+                    b.Property<decimal>("AvgCostAfter")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("avg_cost_after");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("branch_id");
+
+                    b.Property<Guid>("BranchProductId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("branch_product_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("DocCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("doc_code");
+
+                    b.Property<Guid>("DocId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("doc_id");
+
+                    b.Property<string>("DocType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("doc_type");
+
+                    b.Property<decimal>("QtyChange")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)")
+                        .HasColumnName("qty_change");
+
+                    b.Property<decimal>("StockAfter")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)")
+                        .HasColumnName("stock_after");
+
+                    b.Property<decimal>("TotalCostValue")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("total_cost_value");
+
+                    b.Property<DateTime>("TransactionTime")
+                        .HasColumnType("timestamp without time zone")
+                        .HasColumnName("transaction_time");
+
+                    b.Property<decimal>("UnitCostPrice")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("unit_cost_price");
+
+                    b.HasKey("LedgerId")
+                        .HasName("inventory_ledger_pkey");
+
+                    b.HasIndex("BranchId", "TransactionTime")
+                        .HasDatabaseName("ix_ledger_branch_time");
+
+                    b.HasIndex("BranchId", "BranchProductId", "TransactionTime")
+                        .HasDatabaseName("ix_ledger_branch_product_time");
+
+                    b.ToTable("inventory_ledger", (string)null);
+                });
+
             modelBuilder.Entity("MEP_Management_System.Models.InventoryTransferDetail", b =>
                 {
                     b.Property<Guid>("DetailId")
@@ -772,6 +901,10 @@ namespace MEP_Management_System.Migrations
                         .HasColumnType("character varying(50)")
                         .HasColumnName("payment_method");
 
+                    b.Property<Guid>("ShiftId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("shift_id");
+
                     b.Property<string>("Status")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)")
@@ -799,6 +932,8 @@ namespace MEP_Management_System.Migrations
                     b.HasIndex("OrderId")
                         .IsUnique();
 
+                    b.HasIndex("ShiftId");
+
                     b.HasIndex("UserId");
 
                     b.HasIndex(new[] { "InvoiceCode" }, "invoices_invoice_code_key")
@@ -821,6 +956,11 @@ namespace MEP_Management_System.Migrations
 
                     b.Property<decimal?>("ConvertValue")
                         .HasColumnType("numeric");
+
+                    b.Property<decimal>("CostPrice")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("cost_price");
 
                     b.Property<Guid>("InvoiceId")
                         .HasColumnType("uuid")
@@ -1484,6 +1624,9 @@ namespace MEP_Management_System.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("base_unit");
 
+                    b.Property<Guid?>("BranchId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("BrandName")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
@@ -1645,6 +1788,9 @@ namespace MEP_Management_System.Migrations
                         .HasColumnName("type_id")
                         .HasDefaultValueSql("uuid_generate_v4()");
 
+                    b.Property<Guid?>("BranchId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp without time zone")
                         .HasColumnName("created_at");
@@ -1737,6 +1883,9 @@ namespace MEP_Management_System.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("location_id")
                         .HasDefaultValueSql("uuid_generate_v4()");
+
+                    b.Property<Guid?>("BranchId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp without time zone")
@@ -2207,6 +2356,10 @@ namespace MEP_Management_System.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("branch_id");
 
+                    b.Property<Guid?>("ClosedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("closed_by_user_id");
+
                     b.Property<DateTime?>("EndedAt")
                         .HasColumnType("timestamp without time zone")
                         .HasColumnName("ended_at");
@@ -2215,6 +2368,11 @@ namespace MEP_Management_System.Migrations
                         .HasPrecision(15, 2)
                         .HasColumnType("numeric(15,2)")
                         .HasColumnName("expected_cash");
+
+                    b.Property<string>("ForceCloseReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("force_close_reason");
 
                     b.Property<string>("Note")
                         .HasColumnType("text")
@@ -2268,7 +2426,12 @@ namespace MEP_Management_System.Migrations
                     b.HasKey("ShiftId")
                         .HasName("shifts_pkey");
 
-                    b.HasIndex("BranchId");
+                    b.HasIndex("BranchId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_shifts_one_open_per_branch")
+                        .HasFilter("status = 'OPEN'");
+
+                    b.HasIndex("ClosedByUserId");
 
                     b.HasIndex("ShiftCode")
                         .IsUnique()
@@ -2479,9 +2642,16 @@ namespace MEP_Management_System.Migrations
                         .HasColumnName("created_at")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<Guid?>("InwardTicketId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("inward_ticket_id");
+
                     b.Property<string>("Notes")
                         .HasColumnType("text")
                         .HasColumnName("notes");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("text");
 
                     b.Property<string>("Status")
                         .HasMaxLength(50)
@@ -2520,6 +2690,8 @@ namespace MEP_Management_System.Migrations
 
                     b.HasIndex("ConfirmedBy");
 
+                    b.HasIndex("InwardTicketId");
+
                     b.HasIndex("SupplierId");
 
                     b.HasIndex("UserId");
@@ -2552,6 +2724,10 @@ namespace MEP_Management_System.Migrations
                         .HasColumnType("numeric(10,2)")
                         .HasColumnName("discrepancy");
 
+                    b.Property<Guid?>("InwardTicketItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("inward_ticket_item_id");
+
                     b.Property<Guid>("StockTicketId")
                         .HasColumnType("uuid")
                         .HasColumnName("stock_ticket_id");
@@ -2562,12 +2738,16 @@ namespace MEP_Management_System.Migrations
                         .HasColumnName("system_quantity");
 
                     b.Property<decimal?>("UnitPrice")
-                        .HasColumnType("numeric");
+                        .HasPrecision(15, 2)
+                        .HasColumnType("numeric(15,2)")
+                        .HasColumnName("unit_price");
 
                     b.HasKey("TicketItemId")
                         .HasName("stock_ticket_items_pkey");
 
                     b.HasIndex("BranchProductId");
+
+                    b.HasIndex("InwardTicketItemId");
 
                     b.HasIndex("StockTicketId");
 
@@ -3359,6 +3539,12 @@ namespace MEP_Management_System.Migrations
                         .IsRequired()
                         .HasConstraintName("invoices_order_id_fkey");
 
+                    b.HasOne("MEP_Management_System.Models.Shift", "Shift")
+                        .WithMany("Invoices")
+                        .HasForeignKey("ShiftId")
+                        .IsRequired()
+                        .HasConstraintName("invoices_shift_id_fkey");
+
                     b.HasOne("MEP_Management_System.Models.User", "User")
                         .WithMany("Invoices")
                         .HasForeignKey("UserId")
@@ -3366,6 +3552,8 @@ namespace MEP_Management_System.Migrations
                         .HasConstraintName("invoices_user_id_fkey");
 
                     b.Navigation("Order");
+
+                    b.Navigation("Shift");
 
                     b.Navigation("User");
                 });
@@ -3736,6 +3924,12 @@ namespace MEP_Management_System.Migrations
                         .IsRequired()
                         .HasConstraintName("shifts_branch_id_fkey");
 
+                    b.HasOne("MEP_Management_System.Models.User", "ClosedBy")
+                        .WithMany()
+                        .HasForeignKey("ClosedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("shifts_closed_by_user_id_fkey");
+
                     b.HasOne("MEP_Management_System.Models.User", "User")
                         .WithMany("Shifts")
                         .HasForeignKey("UserId")
@@ -3744,6 +3938,8 @@ namespace MEP_Management_System.Migrations
                         .HasConstraintName("shifts_user_id_fkey");
 
                     b.Navigation("Branch");
+
+                    b.Navigation("ClosedBy");
 
                     b.Navigation("User");
                 });
@@ -3799,6 +3995,12 @@ namespace MEP_Management_System.Migrations
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("stock_tickets_confirmed_by_fkey");
 
+                    b.HasOne("MEP_Management_System.Models.StockTicket", "InwardTicket")
+                        .WithMany("OutwardTickets")
+                        .HasForeignKey("InwardTicketId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("stock_tickets_inward_ticket_id_fkey");
+
                     b.HasOne("MEP_Management_System.Models.Supplier", "Supplier")
                         .WithMany("StockTickets")
                         .HasForeignKey("SupplierId")
@@ -3817,6 +4019,8 @@ namespace MEP_Management_System.Migrations
 
                     b.Navigation("ConfirmedByUser");
 
+                    b.Navigation("InwardTicket");
+
                     b.Navigation("Supplier");
 
                     b.Navigation("User");
@@ -3830,6 +4034,12 @@ namespace MEP_Management_System.Migrations
                         .IsRequired()
                         .HasConstraintName("stock_ticket_items_branch_product_id_fkey");
 
+                    b.HasOne("MEP_Management_System.Models.StockTicketItem", "InwardTicketItem")
+                        .WithMany("OutwardTicketItems")
+                        .HasForeignKey("InwardTicketItemId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("stock_ticket_items_inward_ticket_item_id_fkey");
+
                     b.HasOne("MEP_Management_System.Models.StockTicket", "StockTicket")
                         .WithMany("StockTicketItems")
                         .HasForeignKey("StockTicketId")
@@ -3838,6 +4048,8 @@ namespace MEP_Management_System.Migrations
                         .HasConstraintName("stock_ticket_items_stock_ticket_id_fkey");
 
                     b.Navigation("BranchProduct");
+
+                    b.Navigation("InwardTicketItem");
 
                     b.Navigation("StockTicket");
                 });
@@ -4104,9 +4316,21 @@ namespace MEP_Management_System.Migrations
                     b.Navigation("ReturnItems");
                 });
 
+            modelBuilder.Entity("MEP_Management_System.Models.Shift", b =>
+                {
+                    b.Navigation("Invoices");
+                });
+
             modelBuilder.Entity("MEP_Management_System.Models.StockTicket", b =>
                 {
+                    b.Navigation("OutwardTickets");
+
                     b.Navigation("StockTicketItems");
+                });
+
+            modelBuilder.Entity("MEP_Management_System.Models.StockTicketItem", b =>
+                {
+                    b.Navigation("OutwardTicketItems");
                 });
 
             modelBuilder.Entity("MEP_Management_System.Models.Supplier", b =>

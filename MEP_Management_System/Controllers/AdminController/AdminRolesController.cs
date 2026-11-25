@@ -29,7 +29,6 @@ public class AdminRolesController : ControllerBase
     public async Task<IActionResult> GetRoles()
     {
         var roles = await _context.Roles
-            .Where(r => r.RoleName != "SalesStaff" && r.RoleName != "InventoryStaff" && r.RoleName != "Staff")
             .OrderBy(r => r.RoleName)
             .Select(r => new AdminRoleDto
             {
@@ -69,6 +68,30 @@ public class AdminRolesController : ControllerBase
     [HttpGet("permission-matrix")]
     public async Task<IActionResult> GetRolePermissionMatrix()
     {
+        // Dam bao tat ca permission can thiet deu ton tai trong DB
+        var requiredCodes = new[] {
+            "EXPENSE_VIEW", "EXPENSE_CREATE", "EXPENSE_CONFIRM", "EXPENSE_CANCEL", "EXPENSE_CATEGORY_MANAGE",
+            "STAFF_VIEW", "STAFF_CREATE", "STAFF_UPDATE", "STAFF_DELETE", "STAFF_ASSIGN_BRANCH",
+            "SHIFT_VIEW", "SHIFT_CREATE", "SHIFT_UPDATE", "SHIFT_FORCE_CLOSE",
+            "PRINT_VIEW", "PROMOTION_VIEW",
+            "REPORT_VIEW", "PRODUCT_CATEGORY_MANAGE", "STOCK_CHECK_COUNT"
+        };
+        var existingCodes = await _context.Permissions
+            .Where(p => requiredCodes.Contains(p.PermissionCode))
+            .Select(p => p.PermissionCode)
+            .ToListAsync();
+        var missingCodes = requiredCodes.Where(c => !existingCodes.Contains(c)).ToList();
+        foreach (var code in missingCodes)
+        {
+            _context.Permissions.Add(new Permission
+            {
+                PermissionId = Guid.NewGuid(),
+                PermissionCode = code,
+                PermissionName = code
+            });
+        }
+        if (missingCodes.Any()) await _context.SaveChangesAsync();
+
         var matrix = await _context.Roles
             .Include(r => r.Permissions)
             .OrderBy(r => r.RoleName)
@@ -130,6 +153,35 @@ public class AdminRolesController : ControllerBase
             .Where(p => dto.PermissionIds.Contains(p.PermissionId))
             .ToListAsync();
 
+        // Auto-include VIEW permissions khi co quyen thao tac lien quan
+        var assignedCodes = permissionsToAssign.Select(p => p.PermissionCode).ToHashSet();
+        var actionToViewPrefixes = new Dictionary<string, string[]>
+        {
+            { "STOCK_INWARD_CREATE", new[] { "STOCK_INWARD_" } },
+            { "STOCK_OUTWARD_CREATE", new[] { "STOCK_OUTWARD_" } },
+            { "STOCK_CHECK_VIEW", new[] { "STOCK_CHECK_" } },
+            { "PRODUCT_VIEW", new[] { "PRODUCT_" } },
+            { "SALE_VIEW", new[] { "SALE_", "CUSTOMER_", "PAYMENT_" } },
+            { "SUPPLIER_VIEW", new[] { "SUPPLIER_" } },
+            { "EXPENSE_VIEW", new[] { "EXPENSE_" } },
+            { "STAFF_VIEW", new[] { "STAFF_" } },
+        };
+
+        foreach (var kvp in actionToViewPrefixes)
+        {
+            var viewCode = kvp.Key;
+            var actionPrefixes = kvp.Value;
+            if (!assignedCodes.Contains(viewCode) &&
+                assignedCodes.Any(rc => actionPrefixes.Any(ap => rc.StartsWith(ap))))
+            {
+                var viewPerm = await _context.Permissions.FirstOrDefaultAsync(p => p.PermissionCode == viewCode);
+                if (viewPerm != null && !permissionsToAssign.Any(p => p.PermissionId == viewPerm.PermissionId))
+                {
+                    permissionsToAssign.Add(viewPerm);
+                }
+            }
+        }
+
         role.Permissions.Clear();
         foreach (var permission in permissionsToAssign)
         {
@@ -138,6 +190,35 @@ public class AdminRolesController : ControllerBase
 
         await LogAction(role.RoleId, "UPDATE_ROLE_PERMISSIONS", "role_permissions", "Role", $"Cập nhật quyền cho Role: {role.RoleName}");
         await _context.SaveChangesAsync();
+
+        // Dong bo voi sibling role (vd: "SalesStaff" <-> "Sales Staff")
+        var normalizedName = role.RoleName.Trim();
+        string? siblingName = null;
+        if (normalizedName.Equals("SalesStaff", StringComparison.OrdinalIgnoreCase))
+            siblingName = "Sales Staff";
+        else if (normalizedName.Equals("Sales Staff", StringComparison.OrdinalIgnoreCase))
+            siblingName = "SalesStaff";
+        else if (normalizedName.Equals("InventoryStaff", StringComparison.OrdinalIgnoreCase))
+            siblingName = "Inventory Staff";
+        else if (normalizedName.Equals("Inventory Staff", StringComparison.OrdinalIgnoreCase))
+            siblingName = "InventoryStaff";
+
+        if (siblingName != null)
+        {
+            var siblingRole = await _context.Roles
+                .Include(r => r.Permissions)
+                .FirstOrDefaultAsync(r => r.RoleName == siblingName);
+            if (siblingRole != null)
+            {
+                var siblingPermissions = await _context.Permissions
+                    .Where(p => dto.PermissionIds.Contains(p.PermissionId))
+                    .ToListAsync();
+                siblingRole.Permissions.Clear();
+                foreach (var p in siblingPermissions)
+                    siblingRole.Permissions.Add(p);
+                await _context.SaveChangesAsync();
+            }
+        }
 
         return Ok(new { message = $"Đã cập nhật quyền cho {role.RoleName} thành công." });
     }

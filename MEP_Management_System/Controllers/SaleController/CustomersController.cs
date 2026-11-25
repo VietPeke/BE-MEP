@@ -15,7 +15,7 @@ namespace MEP_Management_System.Controllers.SaleController;
 
 [ApiController]
 [Route("api/pos/customers")]
-[HasPermission(PermissionConstants.CUSTOMER_VIEW)]
+[Authorize]
 [Tags("Quản lý bán hàng (Sale)")]
 public class CustomersController : ControllerBase
 {
@@ -62,13 +62,14 @@ public class CustomersController : ControllerBase
 
     // GET /api/pos/customers
     [HttpGet]
+    [Authorize]
     public async Task<ActionResult<PageResultDto<CustomerDto>>> GetCustomers(
         [FromQuery] string? search, [FromQuery] string? group,
         [FromQuery] int page = 1, [FromQuery] int pageSize = 50)
     {
         var branchId = GetBranchId();
 
-        var query = _context.Customers.Where(c => c.BranchId == branchId).AsQueryable();
+        var query = _context.Customers.Where(c => c.BranchId == branchId && (c.Status == 1 || c.Status == null)).AsQueryable();
 
         if (!string.IsNullOrEmpty(search))
             query = query.Where(c =>
@@ -97,11 +98,12 @@ public class CustomersController : ControllerBase
 
     // GET /api/pos/customers/all?search=
     [HttpGet("all")]
+    [Authorize]
     public async Task<ActionResult<List<CustomerDto>>> GetAllCustomers([FromQuery] string? search)
     {
         var branchId = GetBranchId();
 
-        var query = _context.Customers.Where(c => c.BranchId == branchId).AsQueryable();
+        var query = _context.Customers.Where(c => c.BranchId == branchId && (c.Status == 1 || c.Status == null)).AsQueryable();
 
         if (!string.IsNullOrEmpty(search))
             query = query.Where(c =>
@@ -115,6 +117,7 @@ public class CustomersController : ControllerBase
 
     // POST /api/pos/customers
     [HttpPost]
+    [HasPermission(PermissionConstants.CUSTOMER_CREATE)]
     public async Task<ActionResult<CustomerDto>> CreateCustomer([FromBody] CreateCustomerRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.CustomerName))
@@ -124,7 +127,7 @@ public class CustomersController : ControllerBase
             if (!PhoneRegex.IsMatch(request.PhoneNumber))
                 return BadRequest(ApiErrorResponse.Create("MSG-67", "Invalid phone number format. Expected: 0x-xxxx-xxxx (x = digit)"));
             var branchId = GetBranchId();
-            var exists = await _context.Customers.AnyAsync(c => c.PhoneNumber == request.PhoneNumber && c.BranchId == branchId);
+            var exists = await _context.Customers.AnyAsync(c => c.PhoneNumber == request.PhoneNumber && c.BranchId == branchId && (c.Status == 1 || c.Status == null));
             if (exists) return Conflict(ApiErrorResponse.Create("MSG-68", "Phone number already registered in this store"));
         }
 
@@ -150,6 +153,7 @@ public class CustomersController : ControllerBase
 
     // PUT /api/pos/customers/{id}
     [HttpPut("{id:guid}")]
+    [HasPermission(PermissionConstants.CUSTOMER_UPDATE)]
     public async Task<ActionResult<CustomerDto>> UpdateCustomer(Guid id, [FromBody] UpdateCustomerRequest request)
     {
         var branchId = GetBranchId();
@@ -160,7 +164,7 @@ public class CustomersController : ControllerBase
         {
             if (!PhoneRegex.IsMatch(request.PhoneNumber))
                 return BadRequest(ApiErrorResponse.Create("MSG-67", "Invalid phone number format"));
-            var exists = await _context.Customers.AnyAsync(c => c.PhoneNumber == request.PhoneNumber && c.CustomerId != id && c.BranchId == branchId);
+            var exists = await _context.Customers.AnyAsync(c => c.PhoneNumber == request.PhoneNumber && c.CustomerId != id && c.BranchId == branchId && (c.Status == 1 || c.Status == null));
             if (exists) return Conflict(ApiErrorResponse.Create("MSG-68", "Phone number already registered in this store"));
         }
 
@@ -180,6 +184,7 @@ public class CustomersController : ControllerBase
 
     // GET /api/pos/customers/{id}
     [HttpGet("{id:guid}")]
+    [Authorize]
     public async Task<ActionResult<CustomerDto>> GetCustomer(Guid id)
     {
         var branchId = GetBranchId();
@@ -188,8 +193,53 @@ public class CustomersController : ControllerBase
         return Ok(_mapper.Map<CustomerDto>(customer));
     }
 
+    // DELETE /api/pos/customers/{id}
+    // Có đơn hàng → soft-delete (Status = 0) để giữ lịch sử.
+    // Không có đơn → hard-delete.
+    [HttpDelete("{id:guid}")]
+    [HasPermission(PermissionConstants.CUSTOMER_DELETE)]
+    public async Task<IActionResult> DeleteCustomer(Guid id)
+    {
+        var branchId = GetBranchId();
+        var customer = await _context.Customers.FirstOrDefaultAsync(c => c.CustomerId == id && c.BranchId == branchId);
+        if (customer == null) return NotFound(ApiErrorResponse.Create("MSG-01", "Customer not found"));
+
+        var hasOrders = await _context.Orders.AnyAsync(o => o.CustomerId == id);
+        var action = hasOrders ? "SOFT_DELETE_CUSTOMER" : "HARD_DELETE_CUSTOMER";
+
+        if (hasOrders)
+        {
+            customer.Status = 0;
+            if (!string.IsNullOrEmpty(customer.PhoneNumber))
+            {
+                var shortId = customer.CustomerId.ToString().Substring(0, 6);
+                var newPhone = $"d_{shortId}_{customer.PhoneNumber}";
+                if (newPhone.Length > 20) newPhone = newPhone.Substring(0, 20);
+                customer.PhoneNumber = newPhone;
+            }
+            customer.UpdatedAt = DateTime.UtcNow;
+        }
+        else
+        {
+            _context.Customers.Remove(customer);
+        }
+
+        await _context.SaveChangesAsync();
+
+        await TryWriteSystemLog(
+            GetUserId(),
+            action,
+            "customers",
+            "Customer",
+            customer.CustomerId,
+            $"Xóa khách hàng {customer.CustomerName} - SĐT: {customer.PhoneNumber ?? "—"} ({(hasOrders ? "soft-delete" : "hard-delete")})");
+
+        return Ok(new { success = true, message = hasOrders ? "Customer blocked" : "Customer deleted", softDelete = hasOrders });
+    }
+
     // GET /api/pos/customers/{id}/orders
     [HttpGet("{id:guid}/orders")]
+    [Authorize]
     public async Task<ActionResult<PageResultDto<CustomerOrderDto>>> GetCustomerOrders(
         Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
     {

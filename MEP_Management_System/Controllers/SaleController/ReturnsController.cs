@@ -15,7 +15,7 @@ namespace MEP_Management_System.Controllers.SaleController;
 
 [ApiController]
 [Route("api/pos/returns")]
-[HasPermission(PermissionConstants.SALE_VIEW)]
+[Authorize]
 [Tags("Đổi trả hàng (Return Order)")]
 public class ReturnsController : ControllerBase
 {
@@ -127,6 +127,7 @@ public class ReturnsController : ControllerBase
         var r = await _context.ReturnOrders
             .Include(r => r.Order).ThenInclude(o => o!.Branch)
             .Include(r => r.Order).ThenInclude(o => o!.Invoice)
+            .Include(r => r.Order).ThenInclude(o => o!.Customer)
             .Include(r => r.User)
             .Include(r => r.ReturnItems).ThenInclude(ri => ri.BranchProduct).ThenInclude(bp => bp!.Product)
             .FirstOrDefaultAsync(r => r.ReturnOrderId == id && r.Order!.BranchId == branchId);
@@ -148,6 +149,7 @@ public class ReturnsController : ControllerBase
             // BR-81: tìm hóa đơn gốc
             var invoice = await _context.Invoices
                 .Include(i => i.Order).ThenInclude(o => o!.Branch)
+                .Include(i => i.Order).ThenInclude(o => o!.Customer)
                 .Include(i => i.InvoiceItems).ThenInclude(ii => ii.BranchProduct).ThenInclude(bp => bp!.Product).ThenInclude(p => p!.CategoryTaxonomy)
                 .FirstOrDefaultAsync(i => i.InvoiceId == req.InvoiceId && i.Order!.BranchId == branchId);
 
@@ -445,8 +447,11 @@ public class ReturnsController : ControllerBase
         var branchId = GetBranchId();
 
         var ret = await _context.ReturnOrders
-            .Include(r => r.Order)
-            .Include(r => r.ReturnItems)
+            .Include(r => r.Order).ThenInclude(o => o!.Branch)
+            .Include(r => r.Order).ThenInclude(o => o!.Customer)
+            .Include(r => r.Order).ThenInclude(o => o!.Invoice)
+            .Include(r => r.User)
+            .Include(r => r.ReturnItems).ThenInclude(ri => ri.BranchProduct).ThenInclude(bp => bp!.Product)
             .FirstOrDefaultAsync(r => r.ReturnOrderId == id && r.Order!.BranchId == branchId);
 
         if (ret == null) return NotFound(ApiErrorResponse.Create("MSG-01", "Không tìm thấy phiếu đổi trả."));
@@ -568,6 +573,32 @@ public class ReturnsController : ControllerBase
     // GET /api/pos/returns/invoice/{invoiceId:guid}/eligible-items
     /// <summary>
     /// Trả về danh sách sản phẩm trong hóa đơn kèm trạng thái được phép đổi/trả.
+    /// Lấy chính sách đổi trả theo nhóm hàng của chi nhánh hiện tại (dùng cho POS).
+    /// </summary>
+    [HttpGet("category-policies")]
+    public async Task<ActionResult<List<CategoryPolicyDto>>> GetCategoryPolicies()
+    {
+        var branchId = GetBranchId();
+        var config = await _context.SystemConfigs
+            .FirstOrDefaultAsync(c => c.BranchId == branchId && c.ConfigKey == "CATEGORY_RETURN_POLICIES");
+
+        if (config == null || string.IsNullOrWhiteSpace(config.ConfigValue))
+            return Ok(new List<CategoryPolicyDto>());
+
+        try
+        {
+            var policies = JsonSerializer.Deserialize<List<CategoryPolicyDto>>(config.ConfigValue,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            return Ok(policies ?? new List<CategoryPolicyDto>());
+        }
+        catch
+        {
+            return Ok(new List<CategoryPolicyDto>());
+        }
+    }
+
+    /// <summary>
+    /// Kiểm tra sản phẩm trong hóa đơn có đủ điều kiện đổi/trả không.
     /// Mỗi item được đánh giá độc lập theo policy của category riêng.
     /// </summary>
     [HttpGet("invoice/{invoiceId:guid}/eligible-items")]
