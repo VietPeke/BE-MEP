@@ -287,6 +287,15 @@ public class ReportService
             adjustQty = adjData.ToDictionary(x => x.BranchProductId, x => x.Qty);
             adjustValue = adjData.ToDictionary(x => x.BranchProductId, x => x.Value);
 
+            // Tong bien dong SAU ngay ket thuc (toDate -> hien tai)
+            // Dung de tinh nguoc ton cuoi ky chinh xac (ko bi anh huong boi giao dich sau ky)
+            var afterData = await _context.InventoryLedgers
+                .Where(l => l.BranchId == branchId.Value && l.TransactionTime > toDate)
+                .GroupBy(l => l.BranchProductId)
+                .Select(g => new { BranchProductId = g.Key, Qty = g.Sum(l => l.QtyChange) })
+                .ToListAsync();
+            var afterQty = afterData.ToDictionary(x => x.BranchProductId, x => x.Qty);
+
             // Build result
             var items = new List<StockMovementItemDto>();
             decimal totalOpeningV = 0, totalInwardV = 0, totalOutwardV = 0, totalAdjustV = 0, totalClosingV = 0;
@@ -301,9 +310,9 @@ public class ReportService
                 var adjQ = adjustQty.GetValueOrDefault(bpid, 0);
                 var adjV = adjustValue.GetValueOrDefault(bpid, 0);
 
-                // Dung BranchProduct.ActualStock lam ton cuoi ky (source of truth)
-                // Tinh nguoc ton dau ky de dam bao bao cao luon khop voi ton kho thuc te
-                var closingQ = bp.ActualStock;
+                // Ton cuoi ky = ton kho hien tai - bien dong SAU ngay ket thuc
+                // Ton dau ky = ton cuoi ky - nhap + xuat - dieu chinh (tinh nguoc)
+                var closingQ = bp.ActualStock - afterQty.GetValueOrDefault(bpid, 0);
                 var closingV = Math.Round(closingQ * bp.CostPrice, 2);
                 var openQ = closingQ - inQ + outQ - adjQ;
                 var openV = closingV - inV + outV - adjV;
@@ -316,6 +325,7 @@ public class ReportService
                     ProductName = bp.Product?.ProductName ?? "",
                     CategoryName = bp.Product?.CategoryName ?? "",
                     BaseUnit = bp.Product?.BaseUnit ?? "",
+                    IsDeleted = bp.IsActive == -1 || bp.Product?.Status == -1,
                     OpeningStock = openQ, OpeningValue = openV,
                     InwardQuantity = inQ, InwardValue = inV,
                     OutwardQuantity = outQ, OutwardValue = outV,
@@ -401,6 +411,7 @@ public class ReportService
                 ProductId = bp.ProductId, BranchProductId = bpid,
                 ProductCode = bp.Product?.ProductCode ?? "", ProductName = bp.Product?.ProductName ?? "",
                 CategoryName = bp.Product?.CategoryName ?? "", BaseUnit = bp.Product?.BaseUnit ?? "",
+                IsDeleted = bp.IsActive == -1 || bp.Product?.Status == -1,
                 OpeningStock = openQ, OpeningValue = Math.Round(openV, 2),
                 InwardQuantity = inQ, InwardValue = Math.Round(inV, 2),
                 OutwardQuantity = outQ, OutwardValue = Math.Round(outV, 2),
@@ -448,9 +459,7 @@ public class ReportService
         // Enforce SaaS tenant isolation (BranchId == null cho sản phẩm cũ, BranchId == branchId cho sp mới)
         var productsQuery = _context.BranchProducts
             .Include(bp => bp.Product)
-            .Where(bp => bp.BranchId == branchId.Value && 
-                         bp.IsActive != -1 && 
-                         (bp.Product.Status == null || bp.Product.Status != -1) &&
+            .Where(bp => bp.BranchId == branchId.Value &&
                          (bp.Product.BranchId == null || bp.Product.BranchId == branchId.Value));
 
         // Ưu tiên filter theo CategoryId (Guid) - chính xác hơn
@@ -765,6 +774,7 @@ public class ReportService
                 ProductName = bp.Product?.ProductName ?? "",
                 CategoryName = bp.Product?.CategoryName ?? "",
                 BaseUnit = bp.Product?.BaseUnit ?? "",
+                IsDeleted = bp.IsActive == -1 || bp.Product?.Status == -1,
                 OpeningStock = openingStock,
                 InwardQuantity = inwardInPeriod2,
                 OutwardQuantity = outwardInPeriod2,
@@ -854,7 +864,7 @@ public class ReportService
             .Select(ii => new
             {
                 Date = ii.Invoice.CreatedAt!.Value.Date,
-                Cost = ii.Quantity * (ii.BranchProduct.CostPrice > 0 ? ii.BranchProduct.CostPrice : 0m)
+                Cost = ii.Quantity * (ii.ConvertValue ?? 1m) * (ii.CostPrice > 0 ? ii.CostPrice : (ii.BranchProduct.CostPrice > 0 ? ii.BranchProduct.CostPrice : 0m))
             })
             .ToListAsync();
 
@@ -1045,6 +1055,8 @@ public class ReportService
         var query = _context.BranchProducts
             .Include(bp => bp.Product)
             .Where(bp => bp.BranchId == branchId.Value
+                && bp.IsActive == 1
+                && (bp.Product.Status == null || bp.Product.Status != -1)
                 && bp.MinimumStock.HasValue
                 && (request.IncludeZeroStock
                     ? bp.ActualStock <= bp.MinimumStock
@@ -1132,9 +1144,6 @@ public class ReportService
                 && ii.Invoice.CreatedAt.Value <= toDate)
             .ToListAsync();
 
-        // Debug
-        Console.WriteLine($"[ProductProfitReport] branchId={branchId.Value}, fromDate={fromDate}, toDate={toDate}, invoiceItems.Count={invoiceItems.Count}");
-
         // Lọc theo nhóm sản phẩm nếu có
         var filteredItems = invoiceItems;
 
@@ -1178,7 +1187,6 @@ public class ReportService
                 ii.BranchProduct.Product.ProductCode,
                 ii.BranchProduct.Product.ProductName,
                 ii.BranchProduct.Product.CategoryName,
-                ii.BranchProduct.CostPrice
             })
             .Select(g => new
             {
@@ -1186,9 +1194,9 @@ public class ReportService
                 g.Key.ProductCode,
                 g.Key.ProductName,
                 g.Key.CategoryName,
-                QuantitySold = g.Sum(ii => ii.Quantity),
+                QuantitySold = g.Sum(ii => ii.Quantity * (ii.ConvertValue ?? 1m)),
                 Revenue = g.Sum(ii => ii.Quantity * ii.SellPrice),
-                Cost = g.Sum(ii => ii.Quantity * g.Key.CostPrice)
+                Cost = g.Sum(ii => ii.Quantity * (ii.ConvertValue ?? 1m) * (ii.CostPrice > 0 ? ii.CostPrice : ii.BranchProduct.CostPrice))
             })
             .ToList();
 
