@@ -1,0 +1,8 @@
+bin/
+obj/
+publish/
+tempbuild_check/
+.git/
+*.md
+MEP_Management_System/appsettings.Development.json
+MEP_Management_System.UnitTests/
