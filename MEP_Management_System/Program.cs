@@ -160,14 +160,25 @@ builder.Services.AddScoped<IInventoryReportService, InventoryReportService>();
 builder.Services.AddScoped<MepNotificationService>();
 builder.Services.AddSignalR();
 
+// CORS: đọc origins từ config (env AllowedOrigins__0..N trên Render/VPS), fallback list mặc định.
+var allowedOrigins = builder.Configuration
+    .GetSection("AllowedOrigins")
+    .Get<string[]>();
+if (allowedOrigins == null || allowedOrigins.Length == 0)
+{
+    allowedOrigins = new[]
+    {
+        "http://localhost:3000",
+        "https://mep-fe.vercel.app",
+        "https://mep-retail-management-system.vercel.app"
+    };
+}
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins(
-                "http://localhost:3000",
-                "https://mep-retail-management-system.vercel.app"
-            )
+        policy.WithOrigins(allowedOrigins)
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
