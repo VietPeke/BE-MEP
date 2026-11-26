@@ -350,8 +350,7 @@ public class InvoicesController : ControllerBase
                     Quantity = request.Quantity,
                     SellPrice = unitPrice,
                     SelectedUnit = selectedUnit,
-                    ConvertValue = convertValue,
-                    UnitName = bp.Product?.BaseUnit ?? "" // Snapshot tên đơn vị cơ bản
+                    ConvertValue = convertValue
                 };
                 _context.InvoiceItems.Add(item);
                 invoice.InvoiceItems.Add(item);

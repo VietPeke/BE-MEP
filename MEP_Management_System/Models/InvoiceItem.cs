@@ -24,9 +24,6 @@ public partial class InvoiceItem
     /// <summary>Giá vốn snapshot tại thời điểm bán hàng (NUMERIC 18,4).</summary>
     public decimal CostPrice { get; set; }
 
-    /// <summary>Snapshot tên đơn vị cơ bản tại thời điểm bán hàng.</summary>
-    public string? UnitName { get; set; }
-
     public virtual BranchProduct BranchProduct { get; set; } = null!;
 
     public virtual Invoice Invoice { get; set; } = null!;

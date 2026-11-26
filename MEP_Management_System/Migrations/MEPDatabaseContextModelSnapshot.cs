@@ -979,9 +979,6 @@ namespace MEP_Management_System.Migrations
                         .HasColumnType("numeric(15,2)")
                         .HasColumnName("sell_price");
 
-                    b.Property<string>("UnitName")
-                        .HasColumnType("text");
-
                     b.HasKey("InvoiceItemId")
                         .HasName("invoice_items_pkey");
 
@@ -2746,9 +2743,6 @@ namespace MEP_Management_System.Migrations
                         .HasColumnType("numeric(10,2)")
                         .HasColumnName("system_quantity");
 
-                    b.Property<string>("UnitName")
-                        .HasColumnType("text");
-
                     b.Property<decimal?>("UnitPrice")
                         .HasPrecision(15, 2)
                         .HasColumnType("numeric(15,2)")
@@ -3716,7 +3710,8 @@ namespace MEP_Management_System.Migrations
                 {
                     b.HasOne("MEP_Management_System.Models.Customer", "Customer")
                         .WithMany("Payments")
-                        .HasForeignKey("CustomerId");
+                        .HasForeignKey("CustomerId")
+                        .HasConstraintName("payments_customer_id_fkey");
 
                     b.HasOne("MEP_Management_System.Models.Invoice", "Invoice")
                         .WithMany("Payments")

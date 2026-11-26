@@ -631,8 +631,7 @@ namespace MEP_Management_System.Controllers.InventoryController
                             ActualQuantity = bp.ActualStock,
                             Discrepancy = item.Quantity,
                             UnitPrice = effectiveUnitPrice,
-                            InwardTicketItemId = item.InwardTicketItemId,
-                            UnitName = bp.Product?.BaseUnit ?? "" // Snapshot tên đơn vị cơ bản
+                            InwardTicketItemId = item.InwardTicketItemId
                         };
 
                         _context.StockTicketItems.Add(ticketItem);
@@ -1454,7 +1453,7 @@ th {{ background: #f0f0f0; }}
                     Quantity = item.Discrepancy,
                     ActualQuantity = item.ActualQuantity,
                     UnitPrice = (item.UnitPrice ?? 0) > 0 ? item.UnitPrice : (item.BranchProduct?.CostPrice ?? 0),
-                    UnitName = item.UnitName ?? item.BranchProduct?.Product?.BaseUnit,
+                    UnitName = item.BranchProduct?.Product?.BaseUnit,
                     InwardTicketItemId = item.InwardTicketItemId
                 }).ToList() ?? new()
             };

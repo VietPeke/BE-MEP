@@ -310,20 +310,12 @@ public class ReportService
                 var adjQ = adjustQty.GetValueOrDefault(bpid, 0);
                 var adjV = adjustValue.GetValueOrDefault(bpid, 0);
 
-                var isDeleted = bp.IsActive == -1 || bp.Product?.Status == -1;
-
                 // Ton cuoi ky = ton kho hien tai - bien dong SAU ngay ket thuc
-                // San pham da xoa: coi ton kho = 0 vi khong con kinh doanh
-                var effectiveStock = isDeleted ? 0 : bp.ActualStock;
-                var closingQ = effectiveStock - afterQty.GetValueOrDefault(bpid, 0);
-                var closingV = Math.Round(closingQ * bp.CostPrice, 2);
                 // Ton dau ky = ton cuoi ky - nhap + xuat - dieu chinh (tinh nguoc)
+                var closingQ = bp.ActualStock - afterQty.GetValueOrDefault(bpid, 0);
+                var closingV = Math.Round(closingQ * bp.CostPrice, 2);
                 var openQ = closingQ - inQ + outQ - adjQ;
                 var openV = closingV - inV + outV - adjV;
-
-                // Bỏ qua sản phẩm không có phát sinh gì trong kỳ (không tồn kho, không giao dịch)
-                if (openQ == 0 && inQ == 0 && outQ == 0 && adjQ == 0 && closingQ == 0)
-                    continue;
 
                 items.Add(new StockMovementItemDto
                 {
@@ -333,7 +325,7 @@ public class ReportService
                     ProductName = bp.Product?.ProductName ?? "",
                     CategoryName = bp.Product?.CategoryName ?? "",
                     BaseUnit = bp.Product?.BaseUnit ?? "",
-                    IsDeleted = isDeleted,
+                    IsDeleted = bp.IsActive == -1 || bp.Product?.Status == -1,
                     OpeningStock = openQ, OpeningValue = openV,
                     InwardQuantity = inQ, InwardValue = inV,
                     OutwardQuantity = outQ, OutwardValue = outV,
@@ -412,30 +404,19 @@ public class ReportService
             var adjV = adjustmentIn.GetValueOrDefault(bpid, 0) * bp.CostPrice;
 
             var closeQ = openQ + inQ - outQ + adjQ;
-            var closeV = Math.Round(closeQ * bp.CostPrice, 2); // GT_Cuoi = SL_Cuoi x CostPrice hien tai
-
-            var isDeletedLegacy = bp.IsActive == -1 || bp.Product?.Status == -1;
-
-            // San pham da xoa: coi ton kho = 0
-            var displayCloseQ = isDeletedLegacy ? 0 : closeQ;
-            var displayCloseV = isDeletedLegacy ? 0 : closeV;
-
-            // Bo qua san pham khong co phat sinh gi trong ky (khong ton kho, khong giao dich)
-            if (openQ == 0 && inQ == 0 && outQ == 0 && adjQ == 0 && displayCloseQ == 0)
-                if (openQ == 0 && inQ == 0 && outQ == 0 && adjQ == 0 && displayCloseQ == 0)
-                continue;
+            var closeV = Math.Round(closeQ * bp.CostPrice, 2); // GT_Cuối = SL_Cuối × CostPrice hiện tại
 
             items.Add(new StockMovementItemDto
             {
                 ProductId = bp.ProductId, BranchProductId = bpid,
                 ProductCode = bp.Product?.ProductCode ?? "", ProductName = bp.Product?.ProductName ?? "",
                 CategoryName = bp.Product?.CategoryName ?? "", BaseUnit = bp.Product?.BaseUnit ?? "",
-                IsDeleted = isDeletedLegacy,
+                IsDeleted = bp.IsActive == -1 || bp.Product?.Status == -1,
                 OpeningStock = openQ, OpeningValue = Math.Round(openV, 2),
                 InwardQuantity = inQ, InwardValue = Math.Round(inV, 2),
                 OutwardQuantity = outQ, OutwardValue = Math.Round(outV, 2),
                 AdjustmentQuantity = adjQ, AdjustmentValue = Math.Round(adjV, 2),
-                ClosingStock = displayCloseQ, ClosingValue = displayCloseV
+                ClosingStock = closeQ, ClosingValue = closeV
             });
             tOpenV += openV; tInV += inV; tOutV += outV; tAdjV += adjV; tCloseV += closeV;
         }
@@ -785,16 +766,6 @@ public class ReportService
             var adjustmentValueForItem = adjustmentValue;
             var closingValue = openingValue + inwardValue - outwardValue + adjustmentValueForItem;
 
-            var isDeletedCopy = bp.IsActive == -1 || bp.Product?.Status == -1;
-
-            // Sản phẩm đã xóa: coi tồn kho = 0
-            var displayClosingStock = isDeletedCopy ? 0 : closingStock;
-            var displayClosingValue = isDeletedCopy ? 0 : closingValue;
-
-            // Bỏ qua sản phẩm không có phát sinh gì trong kỳ (không tồn kho, không giao dịch)
-            if (openingStock == 0 && inwardInPeriod2 == 0 && outwardInPeriod2 == 0 && adjustmentIn == 0 && displayClosingStock == 0)
-                continue;
-
             items.Add(new StockMovementItemDto
             {
                 ProductId = bp.ProductId,
@@ -803,17 +774,17 @@ public class ReportService
                 ProductName = bp.Product?.ProductName ?? "",
                 CategoryName = bp.Product?.CategoryName ?? "",
                 BaseUnit = bp.Product?.BaseUnit ?? "",
-                IsDeleted = isDeletedCopy,
+                IsDeleted = bp.IsActive == -1 || bp.Product?.Status == -1,
                 OpeningStock = openingStock,
                 InwardQuantity = inwardInPeriod2,
                 OutwardQuantity = outwardInPeriod2,
                 AdjustmentQuantity = adjustmentIn,
-                ClosingStock = displayClosingStock,
+                ClosingStock = closingStock,
                 OpeningValue = openingValue,
                 InwardValue = inwardValue,
                 OutwardValue = outwardValue,
                 AdjustmentValue = adjustmentValueForItem,
-                ClosingValue = displayClosingValue
+                ClosingValue = closingValue
             });
 
             totalOpeningValue += openingValue;
